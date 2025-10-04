@@ -1,0 +1,59 @@
+# --- Python general ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+*.pyo
+*.pyd
+*.pdb
+*.log
+
+# --- Entornos virtuales ---
+venv/
+env/
+.venv/
+.env/
+venv.bak/
+.env.bak/
+
+# --- Flask / Configuración ---
+instance/
+*.db
+*.sqlite3
+*.sqlite
+config.py
+.env
+*.env
+
+# --- Archivos temporales ---
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# --- Build y distribución ---
+build/
+dist/
+*.spec
+
+# --- Archivos de test ---
+.coverage
+htmlcov/
+.tox/
+pytest_cache/
+nosetests.xml
+coverage.xml
+
+# --- Archivos de frontend (si usas JS/React en el proyecto) ---
+node_modules/
+npm-debug.log
+yarn-error.log
+/dist
+/static/build/

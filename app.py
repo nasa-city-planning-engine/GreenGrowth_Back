@@ -5,8 +5,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy import event
 from sqlite3 import Connection as SQLite3Connection
 import os
+from flask_cors import CORS
 
-from routers import message_bp, user_bp
+from routers import message_bp, user_bp, geo_bp
 
 load_dotenv()
 
@@ -22,11 +23,12 @@ def enable_sqlite_foreign_keys(dbapi_connection, connection_record):
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
+CORS(app, resources={r"/*": {"origins": "*"}})
 db.init_app(app)
 
 app.register_blueprint(message_bp)
 app.register_blueprint(user_bp)
+app.register_blueprint(geo_bp)
 
 
 @app.route("/")

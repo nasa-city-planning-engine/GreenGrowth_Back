@@ -5,3 +5,4 @@ db = SQLAlchemy()
 from .MessageModel import Message
 from .TagModel import Tag
 from .UserModel import User
+from .MessageModel import message_tags

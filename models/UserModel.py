@@ -1,6 +1,7 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db
 
+
 # Define the User model
 class User(db.Model):
     __tablename__ = "users"
@@ -10,8 +11,9 @@ class User(db.Model):
     email = db.Column(db.String(150), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     location = db.Column(db.String(256), nullable=False)
-    messages = db.relationship('messages', backref='message', lazy=True, cascade='all, delete-orphan')
-
+    messages = db.relationship(
+        "Message", backref="user", lazy=True, cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<User {self.username}>"
@@ -25,14 +27,16 @@ class User(db.Model):
 
     @staticmethod
     ## CRUD methods
-    def user_register(username, email, password, ubication):
-        if User.query.filter(username == username).first() is not None:
-            return None # Username already exists
+    def user_register(username, email, password, location=None):
+        # check uniqueness properly using filter_by or by comparing the column
+        if User.query.filter_by(username=username).first() is not None:
+            return None  # Username already exists
 
-        if User.query.filter(email == email).first() is not None:
-            return None # Email already exists
+        if User.query.filter_by(email=email).first() is not None:
+            return None  # Email already exists
 
-        new_user = User(username=username, email=email, ubication=ubication)
+        # store into the 'location' column defined on the model
+        new_user = User(username=username, email=email, location=location)
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
@@ -59,7 +63,6 @@ class User(db.Model):
             self.ubication = new_ubication
 
         db.session.commit()
-
 
     def user_Delete(self):
         # User deletion

@@ -10,7 +10,6 @@ class User(db.Model):
     username = db.Column(db.String(150), unique=True, nullable=False)
     email = db.Column(db.String(150), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    location = db.Column(db.String(256), nullable=False)
     messages = db.relationship(
         "Message", backref="user", lazy=True, cascade="all, delete-orphan"
     )
@@ -27,7 +26,7 @@ class User(db.Model):
 
     @staticmethod
     ## CRUD methods
-    def user_register(username, email, password, location=None):
+    def user_register(username, email, password):
         # check uniqueness properly using filter_by or by comparing the column
         if User.query.filter_by(username=username).first() is not None:
             return None  # Username already exists
@@ -36,7 +35,7 @@ class User(db.Model):
             return None  # Email already exists
 
         # store into the 'location' column defined on the model
-        new_user = User(username=username, email=email, location=location)
+        new_user = User(username=username, email=email)
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.commit()
@@ -53,14 +52,12 @@ class User(db.Model):
 
         return None
 
-    def user_update(self, new_username=None, new_email=None, new_ubication=None):
+    def user_update(self, new_username=None, new_email=None):
         # User data update
         if new_username:
             self.username = new_username
         if new_email:
             self.email = new_email
-        if new_ubication:
-            self.ubication = new_ubication
 
         db.session.commit()
 

@@ -44,7 +44,7 @@ class User(db.Model):
         return new_user
 
     @staticmethod
-    def sign_In(username, password):
+    def sign_in(username, password):
         # User authentication
         user = User.query.filter_by(username=username).first()
 
@@ -53,7 +53,7 @@ class User(db.Model):
 
         return None
 
-    def user_Update(self, new_username=None, new_email=None, new_ubication=None):
+    def user_update(self, new_username=None, new_email=None, new_ubication=None):
         # User data update
         if new_username:
             self.username = new_username
@@ -64,7 +64,7 @@ class User(db.Model):
 
         db.session.commit()
 
-    def user_Delete(self):
+    def user_delete(self):
         # User deletion
         db.session.delete(self)
         db.session.commit()

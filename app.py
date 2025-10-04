@@ -43,4 +43,5 @@ def init_db():
       db.session.commit()
       print('Tags creadas correctamente')
 
+    print(Tag.get_tags())
     print("Base de datos inicializada")

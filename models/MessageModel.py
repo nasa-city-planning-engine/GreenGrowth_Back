@@ -1,4 +1,5 @@
 from . import db
+from . import Tag
 
 message_tags = db.Table(
   'message_tags',

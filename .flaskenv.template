@@ -1,4 +1,4 @@
-# Copy this file to .env and fill in your values
+# Copy this file to .flaskenv and fill in your values
 
 # Database URL (SQLite for development, PostgreSQL for production)
 DB_URL=sqlite:///instance/database.db

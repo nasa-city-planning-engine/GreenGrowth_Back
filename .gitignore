@@ -9,7 +9,7 @@ __pycache__/
 *.pdb
 *.log
 
-# --- Entornos virtuales ---
+# --- Virtual environments ---
 venv/
 env/
 .venv/
@@ -18,7 +18,8 @@ venv.bak/
 .env.bak/
 .flaskenv
 
-# --- Flask / Configuración ---
+
+# --- Flask / Configuration ---
 instance/
 *.db
 *.sqlite3
@@ -26,8 +27,10 @@ instance/
 config.py
 .env
 *.env
+*.flaskenv
 
-# --- Archivos temporales ---
+
+# --- Temporary files ---
 *.tmp
 *.swp
 .DS_Store
@@ -39,12 +42,12 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
-# --- Build y distribución ---
+# --- Build and distribution ---
 build/
 dist/
 *.spec
 
-# --- Archivos de test ---
+# --- Test files ---
 .coverage
 htmlcov/
 .tox/
@@ -52,7 +55,7 @@ pytest_cache/
 nosetests.xml
 coverage.xml
 
-# --- Archivos de frontend (si usas JS/React en el proyecto) ---
+# --- Frontend files (if using JS/React in the project) ---
 node_modules/
 npm-debug.log
 yarn-error.log

@@ -1,0 +1,14 @@
+# Copy this file to .flaskenv and fill in your values
+
+# Database URL (SQLite for development, PostgreSQL for production)
+DB_URL=sqlite:///instance/database.db
+
+# Google Earth Engine Project ID
+GEE_PROJECT=your-gee-project-id
+
+# Google Application Credentials path
+GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/credentials.json
+
+# Flask Configuration
+FLASK_APP=app.py
+FLASK_ENV=production

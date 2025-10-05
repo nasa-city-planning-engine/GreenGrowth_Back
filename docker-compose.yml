@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: .
+    ports:
+      - "5001:5000"
+    env_file:
+      - .flaskenv
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - backend_data:/app/instance
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  backend_data:

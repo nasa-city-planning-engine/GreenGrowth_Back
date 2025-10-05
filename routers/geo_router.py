@@ -12,9 +12,9 @@ load_dotenv()
 geo_bp = Blueprint("geo", __name__, url_prefix="/geo")
 
 
-@geo_bp.get("/simulate")
+@geo_bp.post("/simulate")
 def get_simulation_report():
-    data = request.args
+    data = request.get_json()
 
     if not data:
         return jsonify(
@@ -26,13 +26,13 @@ def get_simulation_report():
         )
 
     try:
-        latitude_str = data.get("latitude")
-        longitude_str = data.get("longitude")
-        area_type = data.get("area_type")
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
         preset = data.get("preset")
         geometry = data.get("geometry")
+        buffer = data.get("buffer")
 
-        if not latitude_str or not longitude_str:
+        if not latitude or not longitude:
             return (
                 jsonify(
                     {
@@ -43,22 +43,6 @@ def get_simulation_report():
                 ),
                 400,
             )
-
-        if not area_type:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Missing required parameter: area_type",
-                        "payload": None,
-                    }
-                ),
-                400,
-            )
-
-        latitude = float(latitude_str)
-        longitude = float(longitude_str)
-        buffer = int(data.get("buffer"))
 
         geoprocessor = GeoProcessor(
             latitude=latitude,

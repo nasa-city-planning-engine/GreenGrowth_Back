@@ -24,7 +24,7 @@ geo_bp = Blueprint("geo", __name__, url_prefix="/geo")
 # Simulates an environmental impact report for a given location and parameters
 @geo_bp.get("/simulate")
 def get_simulation_report():
-    data = request.args
+    data = request.get_json()
 
     if not data:
         return jsonify({
@@ -34,11 +34,11 @@ def get_simulation_report():
         })
 
     try:
-        latitude_str = data.get("latitude")
-        longitude_str = data.get("longitude")
-        area_type = data.get("area_type")
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
         preset = data.get("preset")
         geometry = data.get("geometry")
+        buffer = data.get("buffer")
 
         # Validate required parameters
         if not latitude_str or not longitude_str:

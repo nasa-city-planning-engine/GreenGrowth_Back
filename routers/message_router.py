@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
-from models import Message, User, Tag, db
+from sqlalchemy import func
+from models import Message, User, Tag, db, message_tags
 
 message_bp = Blueprint("messages", __name__, url_prefix="/messages")
 
@@ -123,13 +124,16 @@ def get_messages_by_location():
     location = request.args.get("location")
 
     if not location:
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Location is required",
-                "payload": None,
-            }
-        ), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Location is required",
+                    "payload": None,
+                }
+            ),
+            400,
+        )
 
     try:
         messages = Message.query.filter_by(location=location).all()
@@ -161,9 +165,7 @@ def get_messages_by_location():
         return jsonify({"status": "error", "message": str(e), "payload": None}), 500
 
 
-message_bp.delete("/<int:message_id>")
-
-
+@message_bp.delete("/<int:message_id>")
 def delete_message(message_id):
     try:
         message = Message.query.get_or_404(message_id)
@@ -186,9 +188,7 @@ def delete_message(message_id):
         return jsonify({"status": "error", "message": str(e), "payload": None}), 500
 
 
-message_bp.put("/<int:message_id>")
-
-
+@message_bp.put("/<int:message_id>")
 def update_message(message_id):
     data = request.get_json()
 
@@ -236,3 +236,86 @@ def update_message(message_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+
+
+@message_bp.get("/get-messages-by-tag")
+def get_messages_by_tags():
+    tags_param = request.args.get("tags", "")
+    match_mode = request.args.get("match", "any").lower()  # 'any' or 'all'
+
+    if not tags_param:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Missing 'tags' query parameter",
+                    "payload": None,
+                }
+            ),
+            400,
+        )
+
+    tag_names = [t.strip() for t in tags_param.split(",") if t.strip()]
+    if not tag_names:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "No valid tags provided",
+                    "payload": None,
+                }
+            ),
+            400,
+        )
+
+    try:
+        if match_mode == "all":
+            # Messages that have ALL provided tags:
+            messages = (
+                Message.query.join(message_tags)
+                .join(Tag)
+                .filter(Tag.name.in_(tag_names))
+                .group_by(Message.id)
+                .having(func.count(Tag.id) == len(tag_names))
+                .all()
+            )
+        else:
+            messages = Message.query.filter(
+                Message.tags.any(Tag.name.in_(tag_names))
+            ).all()
+
+        payload = [
+            {
+                "id": m.id,
+                "content": m.content,
+                "latitude": getattr(m, "latitude", None),
+                "longitude": getattr(m, "longitude", None),
+                "location": getattr(m, "location", None),
+                "tags": [t.name for t in m.tags],
+            }
+            for m in messages
+        ]
+
+        return (
+            jsonify(
+                {
+                    "status": "success",
+                    "message": "Messages retrieved",
+                    "payload": payload,
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(e),
+                    "payload": None,
+                }
+            ),
+            500,
+        )

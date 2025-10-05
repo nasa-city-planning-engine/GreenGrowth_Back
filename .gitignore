@@ -16,6 +16,7 @@ env/
 .env/
 venv.bak/
 .env.bak/
+.flaskenv
 
 # --- Flask / Configuración ---
 instance/
@@ -57,3 +58,5 @@ npm-debug.log
 yarn-error.log
 /dist
 /static/build/
+
+/secrets/

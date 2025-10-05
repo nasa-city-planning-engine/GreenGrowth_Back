@@ -1,15 +1,22 @@
+
+# utils/geoprocessor.py
+#
+# This module defines the GeoProcessor class for geospatial data processing using Google Earth Engine.
+
 import ee
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 
+# Load environment variables and initialize Earth Engine
 load_dotenv()
 credentials = ee.ServiceAccountCredentials(
     email=None,
     key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 )
 ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+
 
 
 class GeoProcessor:
@@ -19,13 +26,15 @@ class GeoProcessor:
     """
 
     def __init__(self, latitude, longitude, buffer=50000):
+        """
+        Initialize the GeoProcessor with a location and buffer (meters).
+        Pre-calculates base layers for temperature, NDVI, and air quality.
+        """
         self.latitude = latitude
         self.longitude = longitude
         self.buffer = buffer
         # The overall region of interest for clipping results
-        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(
-            self.buffer
-        )
+        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(self.buffer)
 
         # Pre-calculate base layers on startup for performance
         self._initialize_vis_params()
@@ -33,20 +42,15 @@ class GeoProcessor:
         print("🌍 Base layers (Temp, NDVI, AQ) calculated and ready.")
 
     def _initialize_vis_params(self):
-        """Sets the visualization parameters for map tiles."""
+        """
+        Sets the visualization parameters for map tiles (temperature, NDVI, air quality).
+        """
         self.temp_vis_params = {
             "min": -5,
             "max": 45,
             "palette": [
-                "#000080",
-                "#0000FF",
-                "#00FFFF",
-                "#00FF00",
-                "#ADFF2F",
-                "#FFFF00",
-                "#FFA500",
-                "#FF4500",
-                "#FF0000",
+                "#000080", "#0000FF", "#00FFFF", "#00FF00", "#ADFF2F",
+                "#FFFF00", "#FFA500", "#FF4500", "#FF0000",
             ],
         }
         self.ndvi_vis_params = {
@@ -65,6 +69,7 @@ class GeoProcessor:
         """
         Calculates all base data layers from Earth Engine.
         This is run once on initialization to ensure API endpoints are responsive.
+        Layers: Temperature, NDVI (vegetation), Air Quality (composite index).
         """
         # Static date ranges for consistent results
         date_range_monthly = ("2024-05-01", "2024-05-31")
@@ -91,43 +96,22 @@ class GeoProcessor:
         )
         self.base_ndvi = s2_image.normalizedDifference(["B8", "B4"]).rename("NDVI")
 
-        # 3. Comprehensive Air Quality Index Layer
-        # This uses the more advanced 5-component model
+        # 3. Comprehensive Air Quality Index Layer (5-component model)
         aq_components = [
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_NO2",
-                "NO2_column_number_density",
-                0.0,
-                2e-4,
-                date_range_annual,
+                "COPERNICUS/S5P/NRTI/L3_NO2", "NO2_column_number_density", 0.0, 2e-4, date_range_annual
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_SO2",
-                "SO2_column_number_density",
-                0.0,
-                1e-4,
-                date_range_annual,
+                "COPERNICUS/S5P/NRTI/L3_SO2", "SO2_column_number_density", 0.0, 1e-4, date_range_annual
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_O3",
-                "O3_column_number_density",
-                0.0,
-                3e-4,
-                date_range_annual,
+                "COPERNICUS/S5P/NRTI/L3_O3", "O3_column_number_density", 0.0, 3e-4, date_range_annual
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_CO",
-                "CO_column_number_density",
-                0.0,
-                3e-2,
-                date_range_annual,
+                "COPERNICUS/S5P/NRTI/L3_CO", "CO_column_number_density", 0.0, 3e-2, date_range_annual
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_AER_AI",
-                "absorbing_aerosol_index",
-                -1.0,
-                2.0,
-                date_range_annual,
+                "COPERNICUS/S5P/NRTI/L3_AER_AI", "absorbing_aerosol_index", -1.0, 2.0, date_range_annual
             ),
         ]
         self.base_aq = (
@@ -135,8 +119,10 @@ class GeoProcessor:
         )
 
     def _get_normalized_gas(self, coll_id, band, vmin, vmax, date_range):
-        """Helper to fetch, process, and normalize a single gas component for the AQ index."""
-
+        """
+        Helper to fetch, process, and normalize a single gas component for the AQ index.
+        Returns a normalized image (0-100 scale).
+        """
         def apply_qa(img):
             has_qa = img.bandNames().contains("qa_value")
             # Selects the main band and applies a quality mask if available
@@ -165,33 +151,26 @@ class GeoProcessor:
         return normalized.rename("v")
 
     def get_tile_url(self, image, vis_params):
-        """Generates a tile URL for a given Earth Engine image."""
+        """
+        Generates a tile URL for a given Earth Engine image and visualization parameters.
+        """
         map_id = image.clip(self.region).getMapId(vis_params)
         return map_id["tile_fetcher"].url_format
 
     def _create_simulated_images(self, preset, ee_geometry):
-        """Applies a simulation preset to the base layers within a given geometry."""
+        """
+        Applies a simulation preset to the base layers within a given geometry.
+        Returns simulated images for temperature, NDVI, and air quality.
+        """
         presets = {
             "green_area": {
-                "temp_op": "subtract",
-                "temp_val": 5,
-                "ndvi_val": 0.7,
-                "aq_op": "subtract",
-                "aq_val": 10,
+                "temp_op": "subtract", "temp_val": 5, "ndvi_val": 0.7, "aq_op": "subtract", "aq_val": 10,
             },
             "industrial": {
-                "temp_op": "add",
-                "temp_val": 8,
-                "ndvi_val": 0.05,
-                "aq_op": "add",
-                "aq_val": 40,
+                "temp_op": "add", "temp_val": 8, "ndvi_val": 0.05, "aq_op": "add", "aq_val": 40,
             },
             "residential": {
-                "temp_op": "add",
-                "temp_val": 4,
-                "ndvi_val": 0.15,
-                "aq_op": "add",
-                "aq_val": 20,
+                "temp_op": "add", "temp_val": 4, "ndvi_val": 0.15, "aq_op": "add", "aq_val": 20,
             },
         }
         config = presets.get(preset)
@@ -221,11 +200,15 @@ class GeoProcessor:
         return {"temp": sim_temp, "ndvi": sim_ndvi, "aq": sim_aq}
 
     def calculate_impact_stats(self, preset, ee_geometry):
-        """Calculates baseline and post-simulation stats for a given geometry and preset."""
-
+        """
+        Calculates baseline and post-simulation stats for a given geometry and preset.
+        Returns a report with baseline, post-simulation, and delta values.
+        """
         def mean_in_roi(img, band_name, scale):
-            """Helper to compute the mean value of an image within the geometry."""
-            # Use .first() to get the single band after selection
+            """
+            Helper to compute the mean value of an image within the geometry.
+            Returns a float or None.
+            """
             stat = (
                 img.select(band_name)
                 .reduceRegion(
@@ -237,7 +220,6 @@ class GeoProcessor:
                 )
                 .get(band_name)
             )
-            # Use ee.Number to handle potential nulls safely
             return ee.Number(stat).getInfo()
 
         # 1. Calculate Baseline Stats
@@ -263,8 +245,7 @@ class GeoProcessor:
         delta_stats = {
             key: (
                 (post_stats[key] - baseline_stats[key])
-                if post_stats.get(key) is not None
-                and baseline_stats.get(key) is not None
+                if post_stats.get(key) is not None and baseline_stats.get(key) is not None
                 else None
             )
             for key in baseline_stats

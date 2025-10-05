@@ -1,0 +1,41 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+*.md
+
+# Development files
+.flaskenv
+
+# Logs
+*.log
+
+# Database (will be created in container)
+instance/database.db
+
+# Temporary files
+tmp/
+temp/

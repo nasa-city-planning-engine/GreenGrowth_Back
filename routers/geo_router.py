@@ -22,16 +22,18 @@ geo_bp = Blueprint("geo", __name__, url_prefix="/geo")
 
 # Endpoint: /geo/simulate
 # Simulates an environmental impact report for a given location and parameters
-@geo_bp.get("/simulate")
+@geo_bp.post("/simulate")
 def get_simulation_report():
     data = request.get_json()
 
     if not data:
-        return jsonify({
-            "status": "error",
-            "message": "The body of the request is empty",
-            "payload": None,
-        })
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The body of the request is empty",
+                "payload": None,
+            }
+        )
 
     try:
         latitude = data.get("latitude")
@@ -40,62 +42,48 @@ def get_simulation_report():
         geometry = data.get("geometry")
         buffer = data.get("buffer")
 
-        # Validate required parameters
-        if not latitude_str or not longitude_str:
+        if not latitude or not longitude:
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Missing required parameters: latitude and longitude",
-                    "payload": None,
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Missing required parameters: latitude and longitude",
+                        "payload": None,
+                    }
+                ),
                 400,
             )
 
-        if not area_type:
-            return (
-                jsonify({
-                    "status": "error",
-                    "message": "Missing required parameter: area_type",
-                    "payload": None,
-                }),
-                400,
-            )
-
-        # Parse and process parameters
-        latitude = float(latitude_str)
-        longitude = float(longitude_str)
-        buffer = int(data.get("buffer"))
-
-        # Create a GeoProcessor instance for the given location
         geoprocessor = GeoProcessor(
             latitude=latitude,
             longitude=longitude,
             buffer=buffer,
         )
 
-        # Convert geometry string to Earth Engine geometry
         ee_geometry = ee.Geometry(geometry)
         report = geoprocessor.calculate_impact_stats(preset, ee_geometry)
 
         return (
-            jsonify({
-                "status": "success",
-                "message": "Simulation completed successfully",
-                "payload": report,
-            }),
+            jsonify(
+                {
+                    "status": "success",
+                    "message": "Simulation completed successfully",
+                    "payload": report,
+                }
+            ),
             201,
         )
     except Exception as e:
         return (
-            jsonify({
-                "status": "error",
-                "message": str(e),
-                "payload": None,
-            }),
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(e),
+                    "payload": None,
+                }
+            ),
             500,
         )
-
-
 
 # Endpoint: /geo/get-initial-data/<layer_name>
 # Retrieves initial geospatial data for a given layer and location

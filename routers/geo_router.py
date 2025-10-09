@@ -63,6 +63,18 @@ def get_simulation_report():
         ee_geometry = ee.Geometry(geometry)
         report = geoprocessor.calculate_impact_stats(preset, ee_geometry)
 
+        if not report:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Failed to calculate impact stats",
+                        "payload": None,
+                    }
+                ),
+                500,
+            )
+
         return (
             jsonify(
                 {
@@ -73,6 +85,7 @@ def get_simulation_report():
             ),
             201,
         )
+    
     except Exception as e:
         return (
             jsonify(
@@ -120,6 +133,7 @@ def get_initial_data(layer_name):
             "temp": (analyzer.base_temp, analyzer.temp_vis_params),
             "ndvi": (analyzer.base_ndvi, analyzer.ndvi_vis_params),
             "aq": (analyzer.base_aq, analyzer.aq_vis_params),
+            "water_quality": (analyzer.base_water_quality, analyzer.water_quality_vis_params),
         }
 
         if layer_name in layer_map:
@@ -218,6 +232,9 @@ def get_simulation_tiles():
                     ),
                     "sim_aq_url": geoprocessor.get_tile_url(
                         sim_images["aq"], geoprocessor.aq_vis_params
+                    ),
+                    "sim_water_quality_url": geoprocessor.get_tile_url(
+                        sim_images["water_quality"], geoprocessor.water_quality_vis_params
                     ),
                 },
             }),

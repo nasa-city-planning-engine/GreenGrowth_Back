@@ -97,26 +97,56 @@ class GeoProcessor:
         self.base_ndvi = s2_image.normalizedDifference(["B8", "B4"]).rename("NDVI")
 
         # 3. Comprehensive Air Quality Index Layer (5-component model)
-        aq_components = [
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_NO2", "NO2_column_number_density", 0.0, 2e-4, date_range_annual
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_SO2", "SO2_column_number_density", 0.0, 1e-4, date_range_annual
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_O3", "O3_column_number_density", 0.0, 3e-4, date_range_annual
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_CO", "CO_column_number_density", 0.0, 3e-2, date_range_annual
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_AER_AI", "absorbing_aerosol_index", -1.0, 2.0, date_range_annual
-            ),
-        ]
-        self.base_aq = (
-            ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
+        gwp_ch4 = 25
+        gwp_n2o = 298
+
+        co2_image = (
+            ee.ImageCollection("NASA/OCO2/L3_CO2_OI/v10")
+            .select("xco2")
+            .filterDate(date_range_annual)
+            .mean()
         )
+
+        ch4_image = (
+            ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_CH4")
+            .select("CH4_column_number_density")
+            .filterDate(date_range_annual)
+            .mean()
+        )
+        
+        n2o_image = (
+            ee.ImageCollection("COPERNICUS/S5P/OFFL/L3_N2O")
+            .select("N2O_column_number_density")
+            .filterDate(date_range_annual)
+            .mean()
+        )
+
+        pollution_index_co2e = (
+            (co2_image.multiply(1)
+            .add(ch4_image.multiply(gwp_ch4))
+            .add(n2o_image.multiply(gwp_n2o))).norm(0, 100)
+            .rename("AQ_Composite_0_100")
+        )
+        global_geometry = ee.Geometry.Polygon(
+        [[[-180, 90], [180, 90], [180, -90], [-180, -90]]], None, False)
+
+        global_stats = pollution_index_co2e.reduceRegion(
+        reducer=ee.Reducer.minMax(),
+        geometry=global_geometry,
+        scale=10000,  # 10km scale: a coarse but fast way to sample the globe
+        bestEffort=True, # Automatically adjust scale if computation is too large
+        maxPixels=1e9
+        )
+        min_val = ee.Number(global_stats.get(global_stats.keys().get(0)))
+        max_val = ee.Number(global_stats.get(global_stats.keys().get(1)))
+
+        self.base_aq = (
+            (co2_image.multiply(1)
+            .add(ch4_image.multiply(gwp_ch4))
+            .add(n2o_image.multiply(gwp_n2o))).norm(0, 100)
+            .rename("AQ_Composite_0_100")
+        )
+
 
     def _get_normalized_gas(self, coll_id, band, vmin, vmax, date_range):
         """

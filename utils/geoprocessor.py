@@ -1,4 +1,3 @@
-
 # utils/geoprocessor.py
 #
 # This module defines the GeoProcessor class for geospatial data processing using Google Earth Engine.
@@ -18,14 +17,15 @@ credentials = ee.ServiceAccountCredentials(
 ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
 
 
-
 class GeoProcessor:
     """
     Handles all Google Earth Engine logic for fetching, processing, and simulating geospatial data.
     This class is designed to be stateless for use in a Flask API.
     """
 
-    def __init__(self, latitude, longitude, buffer=50000):
+    def __init__(
+        self, latitude, longitude, buffer, temp_industry=None, aq_industry=None
+    ):
         """
         Initialize the GeoProcessor with a location and buffer (meters).
         Pre-calculates base layers for temperature, NDVI, and air quality.
@@ -33,8 +33,13 @@ class GeoProcessor:
         self.latitude = latitude
         self.longitude = longitude
         self.buffer = buffer
+        self.temp_industry = temp_industry
+        self.aq_industry = aq_industry
+
         # The overall region of interest for clipping results
-        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(self.buffer)
+        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(
+            self.buffer
+        )
 
         # Pre-calculate base layers on startup for performance
         self._initialize_vis_params()
@@ -49,8 +54,15 @@ class GeoProcessor:
             "min": -5,
             "max": 45,
             "palette": [
-                "#000080", "#0000FF", "#00FFFF", "#00FF00", "#ADFF2F",
-                "#FFFF00", "#FFA500", "#FF4500", "#FF0000",
+                "#000080",
+                "#0000FF",
+                "#00FFFF",
+                "#00FF00",
+                "#ADFF2F",
+                "#FFFF00",
+                "#FFA500",
+                "#FF4500",
+                "#FF0000",
             ],
         }
         self.ndvi_vis_params = {
@@ -66,7 +78,16 @@ class GeoProcessor:
         self.water_quality_vis_params = {
             "min": 0,
             "max": 100,
-            "palette": ["#0d47a1", "#1976d2", "#42a5f5", "#90caf9", "#ffeb3b", "#ffa726", "#ff5722", "#d32f2f"],
+            "palette": [
+                "#0d47a1",
+                "#1976d2",
+                "#42a5f5",
+                "#90caf9",
+                "#ffeb3b",
+                "#ffa726",
+                "#ff5722",
+                "#d32f2f",
+            ],
         }
         print("🎨 Visualization parameters initialized.")
 
@@ -104,19 +125,39 @@ class GeoProcessor:
         # 3. Comprehensive Air Quality Index Layer (5-component model)
         aq_components = [
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_NO2", "NO2_column_number_density", 0.0, 2e-4, date_range_annual
+                "COPERNICUS/S5P/NRTI/L3_NO2",
+                "NO2_column_number_density",
+                0.0,
+                2e-4,
+                date_range_annual,
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_SO2", "SO2_column_number_density", 0.0, 1e-4, date_range_annual
+                "COPERNICUS/S5P/NRTI/L3_SO2",
+                "SO2_column_number_density",
+                0.0,
+                1e-4,
+                date_range_annual,
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_O3", "O3_column_number_density", 0.0, 3e-4, date_range_annual
+                "COPERNICUS/S5P/NRTI/L3_O3",
+                "O3_column_number_density",
+                0.0,
+                3e-4,
+                date_range_annual,
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_CO", "CO_column_number_density", 0.0, 3e-2, date_range_annual
+                "COPERNICUS/S5P/NRTI/L3_CO",
+                "CO_column_number_density",
+                0.0,
+                3e-2,
+                date_range_annual,
             ),
             self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_AER_AI", "absorbing_aerosol_index", -1.0, 2.0, date_range_annual
+                "COPERNICUS/S5P/NRTI/L3_AER_AI",
+                "absorbing_aerosol_index",
+                -1.0,
+                2.0,
+                date_range_annual,
             ),
         ]
         self.base_aq = (
@@ -147,27 +188,34 @@ class GeoProcessor:
 
         # 3. Chlorophyll-a proxy (Blue/Green ratio, inverted and scaled)
         chlorophyll_ratio = b2.divide(b3.add(0.001))  # Avoid division by zero
-        chlorophyll = ee.Image(1.2).subtract(chlorophyll_ratio).multiply(100).clamp(0, 100)
+        chlorophyll = (
+            ee.Image(1.2).subtract(chlorophyll_ratio).multiply(100).clamp(0, 100)
+        )
 
         # 4. Suspended Sediment Index (Red/Green ratio, scaled)
         sediment_ratio = b4.divide(b3.add(0.001))
-        suspended_sediment = sediment_ratio.subtract(0.5).divide(0.7).multiply(100).clamp(0, 100)
+        suspended_sediment = (
+            sediment_ratio.subtract(0.5).divide(0.7).multiply(100).clamp(0, 100)
+        )
 
         # Composite Water Quality Index (0-100 scale, lower is better)
-        wqi_raw = turbidity.multiply(0.5).add(chlorophyll.multiply(0.25)).add(suspended_sediment.multiply(0.25))
+        wqi_raw = (
+            turbidity.multiply(0.5)
+            .add(chlorophyll.multiply(0.25))
+            .add(suspended_sediment.multiply(0.25))
+        )
 
-        self.base_water_quality = (
-            wqi_raw.updateMask(water_mask).rename("Water_Quality_Index")
+        self.base_water_quality = wqi_raw.updateMask(water_mask).rename(
+            "Water_Quality_Index"
         )
         print("💧 Water Quality layer calculated and ready.")
-
-        
 
     def _get_normalized_gas(self, coll_id, band, vmin, vmax, date_range):
         """
         Helper to fetch, process, and normalize a single gas component for the AQ index.
         Returns a normalized image (0-100 scale).
         """
+
         def apply_qa(img):
             has_qa = img.bandNames().contains("qa_value")
             # Selects the main band and applies a quality mask if available
@@ -209,13 +257,25 @@ class GeoProcessor:
         """
         presets = {
             "green_area": {
-                "temp_op": "subtract", "temp_val": 5, "ndvi_val": 0.7, "aq_op": "subtract", "aq_val": 10,
+                "temp_op": "subtract",
+                "temp_val": 5,
+                "ndvi_val": 0.7,
+                "aq_op": "subtract",
+                "aq_val": 10,
             },
             "industrial": {
-                "temp_op": "add", "temp_val": 8, "ndvi_val": 0.05, "aq_op": "add", "aq_val": 40,
+                "temp_op": "add",
+                "temp_val": self.temp_industry,
+                "ndvi_val": 0.05,
+                "aq_op": "add",
+                "aq_val": self.aq_industry,
             },
             "residential": {
-                "temp_op": "add", "temp_val": 4, "ndvi_val": 0.15, "aq_op": "add", "aq_val": 20,
+                "temp_op": "add",
+                "temp_val": 4,
+                "ndvi_val": 0.15,
+                "aq_op": "add",
+                "aq_val": 20,
             },
         }
         config = presets.get(preset)
@@ -244,13 +304,19 @@ class GeoProcessor:
 
         sim_water_quality = self.base_water_quality.where(mask, ee.Image.constant(0))
 
-        return {"temp": sim_temp, "ndvi": sim_ndvi, "aq": sim_aq, "water_quality": sim_water_quality}
+        return {
+            "temp": sim_temp,
+            "ndvi": sim_ndvi,
+            "aq": sim_aq,
+            "water_quality": sim_water_quality,
+        }
 
     def calculate_impact_stats(self, preset, ee_geometry):
         """
         Calculates baseline and post-simulation stats for a given geometry and preset.
         Returns a report with baseline, post-simulation, and delta values.
         """
+
         def mean_in_roi(img, band_name, scale):
             """
             Helper to compute the mean value of an image within the geometry.
@@ -274,7 +340,9 @@ class GeoProcessor:
             "temp_c_mean": mean_in_roi(self.base_temp, "LST_Day_1km", 1000),
             "ndvi_mean": mean_in_roi(self.base_ndvi, "NDVI", 30),
             "aq_mean_0_100": mean_in_roi(self.base_aq, "AQ_Composite_0_100", 1000),
-            "water_quality_mean": mean_in_roi(self.base_water_quality, "Water_Quality_Index", 30),
+            "water_quality_mean": mean_in_roi(
+                self.base_water_quality, "Water_Quality_Index", 30
+            ),
         }
 
         # 2. Get Simulated Images
@@ -287,14 +355,17 @@ class GeoProcessor:
             "temp_c_mean": mean_in_roi(sim_images["temp"], "LST_Day_1km", 1000),
             "ndvi_mean": mean_in_roi(sim_images["ndvi"], "NDVI", 30),
             "aq_mean_0_100": mean_in_roi(sim_images["aq"], "AQ_Composite_0_100", 1000),
-            "water_quality_mean": mean_in_roi(sim_images["water_quality"], "Water_Quality_Index", 30),
+            "water_quality_mean": mean_in_roi(
+                sim_images["water_quality"], "Water_Quality_Index", 30
+            ),
         }
 
         # 4. Calculate Deltas and assemble the final report
         delta_stats = {
             key: (
                 (post_stats[key] - baseline_stats[key])
-                if post_stats.get(key) is not None and baseline_stats.get(key) is not None
+                if post_stats.get(key) is not None
+                and baseline_stats.get(key) is not None
                 else None
             )
             for key in baseline_stats

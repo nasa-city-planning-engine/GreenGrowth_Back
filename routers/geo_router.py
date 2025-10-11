@@ -1,16 +1,16 @@
-
 # routers/geo_router.py
 #
 # This module defines the geospatial API endpoints for simulation and data retrieval.
 
 import matplotlib
+
 matplotlib.use("Agg")  # Use non-interactive backend for server environments
 
 from flask import Blueprint, jsonify, request
 import ee
 from dotenv import load_dotenv
 import os
-from utils import GeoProcessor
+from utils import GeoProcessor, best_model, industries, get_wind_speed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +18,8 @@ load_dotenv()
 # Define the Blueprint for geospatial routes
 geo_bp = Blueprint("geo", __name__, url_prefix="/geo")
 
+GWP_CH4 = 25
+GWP_N2O = 298
 
 
 # Endpoint: /geo/simulate
@@ -41,6 +43,10 @@ def get_simulation_report():
         preset = data.get("preset")
         geometry = data.get("geometry")
         buffer = data.get("buffer")
+        industries_used = data.get("industries", None)
+        co2 = data.get("co2", 0)
+        ch4 = data.get("ch4", 0)
+        n2o = data.get("n2o", 0)
 
         if not latitude or not longitude:
             return (
@@ -53,12 +59,37 @@ def get_simulation_report():
                 ),
                 400,
             )
+        if preset == "industrial":
+            reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
+            industries_vector = [0] * 43
+            wind_speeds = get_wind_speed(lat=latitude, lon=longitude)
+            if industries_used:
+                for i in industries_used:
+                    industries_vector[industries[i]] = 1
+            data_to_predict = [
+                latitude,
+                longitude,
+                reported_emissions,
+                industries_vector,
+                wind_speeds["~1.5 km"],
+                wind_speeds["~5.5 km"],
+                wind_speeds["~9–10 km"],
+            ]
+            temp = best_model.predict(data_to_predict)
 
-        geoprocessor = GeoProcessor(
-            latitude=latitude,
-            longitude=longitude,
-            buffer=buffer,
-        )
+            geoprocessor = GeoProcessor(
+                latitude=latitude,
+                longitude=longitude,
+                buffer=buffer,
+                temp_industry=temp,
+                aq_industry=reported_emissions,
+            )
+        else:
+            geoprocessor = GeoProcessor(
+                latitude=latitude,
+                longitude=longitude,
+                buffer=buffer,
+            )
 
         ee_geometry = ee.Geometry(geometry)
         report = geoprocessor.calculate_impact_stats(preset, ee_geometry)
@@ -85,7 +116,7 @@ def get_simulation_report():
             ),
             201,
         )
-    
+
     except Exception as e:
         return (
             jsonify(
@@ -97,6 +128,7 @@ def get_simulation_report():
             ),
             500,
         )
+
 
 # Endpoint: /geo/get-initial-data/<layer_name>
 # Retrieves initial geospatial data for a given layer and location
@@ -112,11 +144,13 @@ def get_initial_data(layer_name):
 
         if not latitude_str or not longitude_str or not buffer_str:
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Missing required parameters: latitude, longitude, and buffer",
-                    "payload": None,
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Missing required parameters: latitude, longitude, and buffer",
+                        "payload": None,
+                    }
+                ),
                 400,
             )
 
@@ -133,39 +167,47 @@ def get_initial_data(layer_name):
             "temp": (analyzer.base_temp, analyzer.temp_vis_params),
             "ndvi": (analyzer.base_ndvi, analyzer.ndvi_vis_params),
             "aq": (analyzer.base_aq, analyzer.aq_vis_params),
-            "water_quality": (analyzer.base_water_quality, analyzer.water_quality_vis_params),
+            "water_quality": (
+                analyzer.base_water_quality,
+                analyzer.water_quality_vis_params,
+            ),
         }
 
         if layer_name in layer_map:
             image, params = layer_map[layer_name]
             url = analyzer.get_tile_url(image, params)
             return (
-                jsonify({
-                    "status": "success",
-                    "message": "Initial data retrieved successfully",
-                    "payload": {"url": url, "layer": layer_name},
-                }),
+                jsonify(
+                    {
+                        "status": "success",
+                        "message": "Initial data retrieved successfully",
+                        "payload": {"url": url, "layer": layer_name},
+                    }
+                ),
                 201,
             )
         return (
-            jsonify({
-                "status": "error",
-                "message": "Layer not found",
-                "payload": None,
-            }),
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Layer not found",
+                    "payload": None,
+                }
+            ),
             404,
         )
 
     except Exception as e:
         return (
-            jsonify({
-                "status": "error",
-                "message": str(e),
-                "payload": None,
-            }),
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(e),
+                    "payload": None,
+                }
+            ),
             500,
         )
-
 
 
 # Endpoint: /geo/simulate-tiles
@@ -184,18 +226,22 @@ def get_simulation_tiles():
         # Validate required parameters
         if not latitude_str or not longitude_str or not geometry_str:
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Missing required parameters: latitude, longitude, or geometry",
-                    "payload": None,
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Missing required parameters: latitude, longitude, or geometry",
+                        "payload": None,
+                    }
+                ),
                 400,
             )
 
         # Parse parameters
         latitude = float(latitude_str)
         longitude = float(longitude_str)
-        geometry = float(geometry_str)  # NOTE: This may need to be parsed as geojson or WKT
+        geometry = float(
+            geometry_str
+        )  # NOTE: This may need to be parsed as geojson or WKT
 
         # Create a GeoProcessor instance
         geoprocessor = GeoProcessor(
@@ -210,42 +256,49 @@ def get_simulation_tiles():
 
         if sim_images is None:
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Simulation images could not be created",
-                    "payload": None,
-                }),
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Simulation images could not be created",
+                        "payload": None,
+                    }
+                ),
                 500,
             )
 
         # Return URLs for simulated environmental layers
         return (
-            jsonify({
-                "status": "success",
-                "message": "Simulation completed successfully",
-                "payload": {
-                    "sim_temp_url": geoprocessor.get_tile_url(
-                        sim_images["temp"], geoprocessor.temp_vis_params
-                    ),
-                    "sim_ndvi_url": geoprocessor.get_tile_url(
-                        sim_images["ndvi"], geoprocessor.ndvi_vis_params
-                    ),
-                    "sim_aq_url": geoprocessor.get_tile_url(
-                        sim_images["aq"], geoprocessor.aq_vis_params
-                    ),
-                    "sim_water_quality_url": geoprocessor.get_tile_url(
-                        sim_images["water_quality"], geoprocessor.water_quality_vis_params
-                    ),
-                },
-            }),
+            jsonify(
+                {
+                    "status": "success",
+                    "message": "Simulation completed successfully",
+                    "payload": {
+                        "sim_temp_url": geoprocessor.get_tile_url(
+                            sim_images["temp"], geoprocessor.temp_vis_params
+                        ),
+                        "sim_ndvi_url": geoprocessor.get_tile_url(
+                            sim_images["ndvi"], geoprocessor.ndvi_vis_params
+                        ),
+                        "sim_aq_url": geoprocessor.get_tile_url(
+                            sim_images["aq"], geoprocessor.aq_vis_params
+                        ),
+                        "sim_water_quality_url": geoprocessor.get_tile_url(
+                            sim_images["water_quality"],
+                            geoprocessor.water_quality_vis_params,
+                        ),
+                    },
+                }
+            ),
             201,
         )
     except Exception as e:
         return (
-            jsonify({
-                "status": "error",
-                "message": str(e),
-                "payload": None,
-            }),
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(e),
+                    "payload": None,
+                }
+            ),
             500,
         )

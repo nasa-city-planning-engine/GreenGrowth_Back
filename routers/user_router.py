@@ -65,6 +65,67 @@ def register_user():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+    
+@user_bp.post("/login")
+def login_user():
+    data = request.get_json()
+
+    if not data:
+        return (
+            jsonify({
+                "status": "error",
+                "message": "The body of the request is empty",
+                "payload": None,
+            }),
+            400,
+        )
+
+    try:
+        user = User.query.filter_by(username=data["username"]).first()
+        if user and user.password == data["password"]:
+            return (
+                jsonify({
+                    "status": "success",
+                    "message": f"User {user.username} logged in successfully",
+                    "payload": {
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                    },
+                }),
+                200,
+            )
+        else:
+            return (
+                jsonify({
+                    "status": "error",
+                    "message": "Invalid username or password",
+                    "payload": None,
+                }),
+                401,
+            )
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+
+@user_bp.get("/<int:user_id>")
+def get_user(user_id):
+    try:
+        user = User.query.get_or_404(user_id)
+        return (
+            jsonify({
+                "status": "success",
+                "message": "User retrieved successfully",
+                "payload": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                },
+            }),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+    
 
 
 # Endpoint: GET /users/
@@ -142,6 +203,21 @@ def update_user(user_id):
                     "username": user.username,
                     "email": user.email,
                 },
+            }),
+            200,
+        )
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+
+@user_bp.post("/<int:user_id>/logout")
+def logout_user(user_id):
+    try:
+        return (
+            jsonify({
+                "status": "success",
+                "message": "User logged out successfully",
+                "payload": None,
             }),
             200,
         )

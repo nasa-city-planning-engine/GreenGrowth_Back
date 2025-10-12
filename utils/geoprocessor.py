@@ -67,22 +67,11 @@ _GA_CFG = {
 }
 
 load_dotenv()
-
-# Attempt to initialize Google Earth Engine only if the credentials file exists.
-# If the credentials file is missing, avoid initializing at import time so the
-# application can still start (but EE-dependent functionality will raise a
-# clear error when used).
-_EE_AVAILABLE = False
-_ee_key_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if _ee_key_file and os.path.exists(_ee_key_file):
-    try:
-        credentials = ee.ServiceAccountCredentials(email=None, key_file=_ee_key_file)
-        ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
-        _EE_AVAILABLE = True
-    except Exception as init_exc:
-        print(f"⚠️ Earth Engine initialization failed: {init_exc}")
-else:
-    print(f"⚠️ GOOGLE_APPLICATION_CREDENTIALS not set or file not found: {_ee_key_file}")
+credentials = ee.ServiceAccountCredentials(
+    email=None,
+    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+)
+ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
 
 
 class GeoAnalytics:
@@ -96,13 +85,6 @@ class GeoAnalytics:
         temp_industry=0,
         aq_industry=0,
     ):
-        # Ensure EE is initialized before creating EE geometries/images
-        if not _EE_AVAILABLE:
-            raise RuntimeError(
-                "Google Earth Engine is not initialized. "
-                "Set the environment variable GOOGLE_APPLICATION_CREDENTIALS to a valid service account JSON file "
-                "and ensure the file exists on disk."
-            )
 
         self.latitude, self.longitude, self.buffer = latitude, longitude, buffer
         # Región general de interés para filtrar colecciones

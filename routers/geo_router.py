@@ -192,8 +192,8 @@ def get_initial_data(layer_name):
         longitude = float(longitude_str)
         buffer = int(buffer_str)
 
-        # Create a GeoProcessor instance
-        analyzer = GeoProcessor(latitude=latitude, longitude=longitude, buffer=buffer)
+        # Create a GeoAnalytics instance
+        analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
 
         # Map layer names to their corresponding images and visualization parameters
         layer_map = {
@@ -272,8 +272,8 @@ def get_simulation_tiles():
             geometry_str
         )  # NOTE: This may need to be parsed as geojson or WKT
 
-        # Create a GeoProcessor instance
-        geoprocessor = GeoProcessor(
+        # Create a GeoAnalytics instance
+        geoprocessor = GeoAnalytics(
             latitude=latitude,
             longitude=longitude,
             buffer=buffer,

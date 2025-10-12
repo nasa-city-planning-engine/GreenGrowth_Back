@@ -1,58 +1,19 @@
-# utils/geoprocessor.py
-#
-# This module defines the GeoProcessor class for geospatial data processing using Google Earth Engine.
-
 import ee
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+import json
+from typing import Dict, Any, Tuple, Optional, Union, List
 import os
 from dotenv import load_dotenv
 
-# Load environment variables and initialize Earth Engine
 load_dotenv()
-credentials = ee.ServiceAccountCredentials(
-    email=None,
-    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-)
-ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
 
-
-class GeoProcessor:
-    """
-    Handles all Google Earth Engine logic for fetching, processing, and simulating geospatial data.
-    This class is designed to be stateless for use in a Flask API.
-    """
-
-    def __init__(
-        self, latitude, longitude, buffer, temp_industry=None, aq_industry=None
-    ):
-        """
-        Initialize the GeoProcessor with a location and buffer (meters).
-        Pre-calculates base layers for temperature, NDVI, and air quality.
-        """
-        self.latitude = latitude
-        self.longitude = longitude
-        self.buffer = buffer
-        self.temp_industry = temp_industry
-        self.aq_industry = aq_industry
-
-        # The overall region of interest for clipping results
-        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(
-            self.buffer
-        )
-
-        # Pre-calculate base layers on startup for performance
-        self._initialize_vis_params()
-        self._calculate_base_layers()
-        print("🌍 Base layers (Temp, NDVI, AQ, Water Quality) calculated and ready.")
-
-    def _initialize_vis_params(self):
-        """
-        Sets the visualization parameters for map tiles (temperature, NDVI, air quality, water quality).
-        """
-        self.temp_vis_params = {
-            "min": -5,
-            "max": 45,
+# --- Configuración global (similar a _CFG en la original, pero simplificada para la adaptación) ---
+_GA_CFG = {
+    "date_month": ("2025-05-01", "2025-05-31"),
+    "date_year": ("2023-01-01", "2023-12-31"),
+    "vis": {
+        "temp": {
+            "min": -25,
+            "max": 50,
             "palette": [
                 "#000080",
                 "#0000FF",
@@ -63,110 +24,181 @@ class GeoProcessor:
                 "#FFA500",
                 "#FF4500",
                 "#FF0000",
+                "#8B0000",
+                "#FFFFFF",
             ],
-        }
-        self.ndvi_vis_params = {
+        },
+        "ndvi": {
             "min": 0,
             "max": 0.7,
             "palette": ["#ff0000", "#ffff00", "#00ff00", "#004d00"],
-        }
-        self.aq_vis_params = {
+        },
+        "aq": {
             "min": 0,
             "max": 100,
             "palette": ["#2DC937", "#E7B416", "#E77D11", "#CC3232", "#6B1A6B"],
-        }
+        },
+    },
+    "norm_user": {
+        # existentes (residencial)
+        "densidad": {"buildings_per_km2": {"min": 0.0, "max": 1000.0}},
+        "trafico": {"veh_day": {"min": 0.0, "max": 20000.0}},
+        "albedo": {
+            "albedo_0_1": {"min": 0.0, "max": 1.0},
+            "cool_roof_pct": {"min": 0.0, "max": 100.0},
+        },
+        # nuevos (area verde)
+        "arboles": {"trees_per_ha": {"min": 0.0, "max": 400.0}},
+        "pasto": {"pct": {"min": 0.0, "max": 100.0}},
+        "copa": {"pct": {"min": 0.0, "max": 100.0}},
+    },
+    "aq_sources": {
+        "COPERNICUS/S5P/NRTI/L3_NO2": ("NO2_column_number_density", (0.0, 2e-4)),
+        "COPERNICUS/S5P/NRTI/L3_SO2": ("SO2_column_number_density", (0.0, 1e-4)),
+        "COPERNICUS/S5P/NRTI/L3_O3": ("O3_column_number_density", (0.0, 3e-4)),
+        "COPERNICUS/S5P/NRTI/L3_CO": ("CO_column_number_density", (0.0, 3e-2)),
+        "COPERNICUS/S5P/NRTI/L3_AER_AI": ("absorbing_aerosol_index", (-1.0, 2.0)),
+    },
+    "presets": {
+        "green_area": "NDVI_p90",
+        "residential": "NDVI_p50",
+        "industrial": "NDVI_p10",
+    },
+}
 
-        print("🎨 Visualization parameters initialized.")
+load_dotenv()
+credentials = ee.ServiceAccountCredentials(
+    email=None,
+    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+)
+ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
 
-    def _calculate_base_layers(self):
-        """
-        Calculates all base data layers from Earth Engine.
-        This is run once on initialization to ensure API endpoints are responsive.
-        Layers: Temperature, NDVI (vegetation), Air Quality (composite index), Water Quality.
-        """
-        # Static date ranges for consistent results
-        date_range_monthly = ("2024-05-01", "2024-05-31")
-        date_range_annual = ("2023-01-01", "2023-12-31")
 
-        # 1. Temperature Layer
-        self.base_temp = (
-            ee.ImageCollection("MODIS/061/MOD11A1")
-            .filterBounds(self.region)
-            .filterDate(*date_range_monthly)
-            .median()
-            .select("LST_Day_1km")
-            .multiply(0.02)
-            .subtract(273.15)
+class GeoAnalytics:
+    _CFG = _GA_CFG
+
+    def __init__(
+        self,
+        latitude: float,
+        longitude: float,
+        buffer: int = 50000,
+        temp_industry=0,
+        aq_industry=0,
+    ):
+
+        self.latitude, self.longitude, self.buffer = latitude, longitude, buffer
+        # Región general de interés para filtrar colecciones
+        self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(
+            self.buffer
         )
 
-        # 2. NDVI (Vegetation) Layer
-        s2_image = (
+        # Variables de estado para las capas base y simulaciones
+        self.temp_image: ee.Image = None
+        self.ndvi: ee.Image = None
+        self.ndbi: ee.Image = None
+        self.aq_index: ee.Image = None
+        self.sim_temp: ee.Image = None
+        self.sim_ndvi: ee.Image = None
+        self.sim_aq: ee.Image = None
+        self.reg_coefs: Optional[Dict[str, List[ee.Number]]] = None
+        self.metrics: Optional[Dict[str, Dict[str, ee.Number]]] = None
+        self.attr_norm: Dict[str, Any] = self._CFG["norm_user"]
+        self.temp_industry = temp_industry
+        self.aq_industry = aq_industry
+
+        # Inicializar capas base al instanciar (similar a GeoProcessor)
+        self._calculate_base_layers()
+
+    # --- Métodos de utilidad estáticos y privados ---
+
+    @staticmethod
+    def _normalize(img: ee.Image, vmin: float, vmax: float, to: int = 100) -> ee.Image:
+        """Normaliza una imagen al rango [0, to]."""
+        return (
+            img.subtract(vmin)
+            .divide(ee.Number(vmax).subtract(vmin))
+            .multiply(to)
+            .clamp(0, to)
+        )
+
+    @staticmethod
+    def _mean(img: ee.Image, scale: int, geom: ee.Geometry) -> ee.Dictionary:
+        """Calcula el valor medio de una imagen en una geometría."""
+        return img.reduceRegion(
+            ee.Reducer.mean(), geom, scale, maxPixels=1e13, bestEffort=True
+        )
+
+    @staticmethod
+    def _geojson_to_ee_geom(geojson_area: Dict[str, Any]) -> ee.Geometry:
+        """Convierte un diccionario GeoJSON a una geometría de Earth Engine."""
+        # Se asume que el GeoJSON es un Feature o Geometry válido
+        return ee.Geometry(geojson_area)
+
+    def _unit_range(self, var: str, unit: str) -> Tuple[ee.Number, ee.Number]:
+        """Obtiene el rango min/max para la unidad de una variable de atributo."""
+        cfg = self.attr_norm.get(var, {}).get(unit)
+        if cfg is None:
+            raise ValueError(f"Unidad no soportada para {var}: {unit}")
+        return ee.Number(cfg["min"]), ee.Number(cfg["max"])
+
+    def _norm_value(
+        self, x: Union[float, int, ee.Number], vmin: ee.Number, vmax: ee.Number
+    ) -> ee.Number:
+        """Normaliza un valor escalar entre [0, 1]."""
+        x = ee.Number(x)
+        return x.subtract(vmin).divide(ee.Number(vmax).subtract(vmin)).clamp(0, 1)
+
+    def _month(self, date_str: str) -> ee.Number:
+        """Extrae el mes de una cadena de fecha."""
+        return ee.Date(date_str).get("month")
+
+    def _ndvi_percentiles_for_month(self, month_int: ee.Number) -> ee.Image:
+        """Calcula los percentiles NDVI para un mes específico en la región."""
+        s2 = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(self.region)
-            .filterDate(*date_range_monthly)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 10))
-            .median()
+            .filter(ee.Filter.calendarRange(month_int, month_int, "month"))
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
         )
-        self.base_ndvi = s2_image.normalizedDifference(["B8", "B4"]).rename("NDVI")
-
-        # 3. Comprehensive Air Quality Index Layer (5-component model)
-        aq_components = [
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_NO2",
-                "NO2_column_number_density",
-                0.0,
-                2e-4,
-                date_range_annual,
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_SO2",
-                "SO2_column_number_density",
-                0.0,
-                1e-4,
-                date_range_annual,
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_O3",
-                "O3_column_number_density",
-                0.0,
-                3e-4,
-                date_range_annual,
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_CO",
-                "CO_column_number_density",
-                0.0,
-                3e-2,
-                date_range_annual,
-            ),
-            self._get_normalized_gas(
-                "COPERNICUS/S5P/NRTI/L3_AER_AI",
-                "absorbing_aerosol_index",
-                -1.0,
-                2.0,
-                date_range_annual,
-            ),
-        ]
-        self.base_aq = (
-            ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
+        ndvi_ic = s2.map(lambda i: i.normalizedDifference(["B8", "B4"]).rename("NDVI"))
+        return ndvi_ic.reduce(ee.Reducer.percentile([10, 50, 90])).rename(
+            ["NDVI_p10", "NDVI_p50", "NDVI_p90"]
         )
 
-    def _get_normalized_gas(self, coll_id, band, vmin, vmax, date_range):
+    def _get_normalized_gas(
+        self,
+        coll_id: str,
+        band: str,
+        vmin: float,
+        vmax: float,
+        date_range: Tuple[str, str],
+    ) -> ee.Image:
         """
-        Helper to fetch, process, and normalize a single gas component for the AQ index.
-        Returns a normalized image (0-100 scale).
+        Helper para obtener, procesar y normalizar un componente de gas para el índice AQ.
+        Retorna una imagen normalizada (escala 0-100).
+        ***LÓGICA CORREGIDA para evitar operaciones de cliente en .map()***
         """
 
-        def apply_qa(img):
-            has_qa = img.bandNames().contains("qa_value")
-            # Selects the main band and applies a quality mask if available
+        def apply_qa(img: ee.Image) -> ee.Image:
+            """Aplica máscara de calidad usando lógica puramente de servidor (EE)."""
+
+            # --- CORRECCIÓN CLAVE AQUÍ ---
+
+            # Comprobar la existencia de la banda 'qa_value' usando una lista de nombres de banda
+            # NOTA: bandNames() es una operación de servidor, pero la lista resultante
+            # puede ser usada con ee.List.contains()
+            has_qa = ee.List(img.bandNames()).contains("qa_value")
+
             main_band_img = img.select(band)
             qa_mask = img.select("qa_value").gt(0.75)
-            return ee.Image(
-                ee.Algorithms.If(
-                    has_qa, main_band_img.updateMask(qa_mask), main_band_img
-                )
+
+            # Usar ee.Algorithms.If para aplicar la máscara solo si la banda existe.
+            masked_img = ee.Algorithms.If(
+                has_qa,
+                main_band_img.updateMask(qa_mask),
+                main_band_img,  # Retorna sin máscara si la banda 'qa_value' no existe
             )
+            return ee.Image(masked_img)
 
         collection = (
             ee.ImageCollection(coll_id)
@@ -176,136 +208,519 @@ class GeoProcessor:
             .mean()
         )
 
-        normalized = (
-            collection.subtract(vmin)
-            .divide(ee.Number(vmax).subtract(vmin))
-            .multiply(100)
-            .clamp(0, 100)
-        )
+        normalized = self._normalize(collection, vmin, vmax, to=100)
         return normalized.rename("v")
 
-    def get_tile_url(self, image, vis_params):
-        """
-        Generates a tile URL for a given Earth Engine image and visualization parameters.
-        """
-        map_id = image.clip(self.region).getMapId(vis_params)
-        return map_id["tile_fetcher"].url_format
+    def _calculate_base_layers(self):
+        """Calcula todas las capas de datos base de Earth Engine."""
+        dm, dy = self._CFG["date_month"], self._CFG["date_year"]
 
-    def _create_simulated_images(self, preset, ee_geometry):
-        """
-        Applies a simulation preset to the base layers within a given geometry.
-        Returns simulated images for temperature, NDVI, and air quality.
-        """
-        presets = {
-            "green_area": {
-                "temp_op": "subtract",
-                "temp_val": 5,
-                "ndvi_val": 0.7,
-                "aq_op": "subtract",
-                "aq_val": 10,
-            },
-            "industrial": {
-                "temp_op": "add",
-                "temp_val": self.temp_industry,
-                "ndvi_val": 0.05,
-                "aq_op": "add",
-                "aq_val": self.aq_industry,
-            },
-            "residential": {
-                "temp_op": "add",
-                "temp_val": 4,
-                "ndvi_val": 0.15,
-                "aq_op": "add",
-                "aq_val": 20,
-            },
+        # 1. LST (°C)
+        self.temp_image = (
+            ee.ImageCollection("MODIS/061/MOD11A1")
+            .filterBounds(self.region)
+            .filterDate(*dm)
+            .median()
+            .select("LST_Day_1km")
+            .multiply(0.02)
+            .subtract(273.15)
+        )
+
+        # 2. Sentinel-2: NDVI & NDBI
+        s2 = (
+            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterBounds(self.region)
+            .filterDate(*dm)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 10))
+            .median()
+        )
+        self.ndvi = s2.normalizedDifference(["B8", "B4"]).rename("NDVI")
+        self.ndbi = s2.expression(
+            "(swir - nir) / (swir + nir)",
+            {"swir": s2.select("B11"), "nir": s2.select("B8A")},
+        ).rename("NDBI")
+
+        # 3. AQ proxy (0–100)
+        comps = []
+        for coll, (band, (vmin, vmax)) in self._CFG["aq_sources"].items():
+            img = self._get_normalized_gas(coll, band, vmin, vmax, dy)
+            comps.append(img.rename("v"))
+        self.aq_index = ee.ImageCollection(comps).mean().rename("AQ_Composite_0_100")
+        print("🌍 Capas base (Temp, NDVI, AQ) calculadas y listas.")
+
+    # --- Métodos de modelo y calibración ---
+
+    def _fit_linear_models_simple(
+        self, sample_scale: int = 250, n: int = 4000, seed: int = 13
+    ) -> Dict[str, Dict[str, ee.Number]]:
+        """Ajusta un modelo de regresión lineal simple (NDVI vs LST y NDVI vs AQ)."""
+        samples = (
+            self.temp_image.addBands(self.ndvi)
+            .addBands(self.aq_index)
+            .sample(
+                region=self.region,
+                scale=sample_scale,
+                numPixels=n,
+                geometries=False,
+                seed=seed,
+            )
+        )
+
+        def _fit(x: str, y: str) -> Dict[str, ee.Number]:
+            fit = samples.reduceColumns(ee.Reducer.linearFit(), selectors=[x, y])
+            return {"a": ee.Number(fit.get("scale")), "b": ee.Number(fit.get("offset"))}
+
+        return {
+            "LST": _fit("NDVI", "LST_Day_1km"),
+            "AQ": _fit("NDVI", "AQ_Composite_0_100"),
         }
-        config = presets.get(preset)
-        if not config:
-            return None
 
-        # Create a binary mask from the user's geometry
+    def _linreg_metrics(
+        self,
+        features: ee.FeatureCollection,
+        y_true_key: str = "y_true",
+        y_pred_key: str = "y_pred",
+    ) -> ee.List:
+        """Calcula R^2 y RMSE a partir de una FeatureCollection de valores reales y predichos."""
+        fc = features.filter(ee.Filter.notNull([y_true_key, y_pred_key]))
+        y = ee.List(fc.aggregate_array(y_true_key))
+        yhat = ee.List(fc.aggregate_array(y_pred_key))
+        n = y.length().min(yhat.length())
+
+        def _metrics(y: ee.List, yhat: ee.List, n: ee.Number) -> ee.List:
+            mean_y = ee.Number(y.reduce(ee.Reducer.mean()))
+            ss_tot = ee.Number(
+                y.map(lambda v: ee.Number(v).subtract(mean_y).pow(2)).reduce(
+                    ee.Reducer.sum()
+                )
+            )
+            ss_res = ee.Number(
+                y.zip(yhat)
+                .map(
+                    lambda p: ee.Number(ee.List(p).get(0))
+                    .subtract(ee.Number(ee.List(p).get(1)))
+                    .pow(2)
+                )
+                .reduce(ee.Reducer.sum())
+            )
+            r2 = ee.Number(1).subtract(ss_res.divide(ss_tot))
+            rmse = ss_res.divide(ee.Number(n)).sqrt()
+            return ee.List([r2, rmse])
+
+        return ee.Algorithms.If(
+            n.eq(0),
+            ee.List([ee.Number(0), ee.Number(float("nan"))]),
+            _metrics(y.slice(0, n), yhat.slice(0, n), n),
+        )
+
+    def calibrate_precision(
+        self,
+        train_frac: float = 0.7,
+        sample_scale: int = 250,
+        n_samples: int = 8000,
+        seed: int = 42,
+    ):
+        """
+        Ajusta modelos de regresión lineal múltiple (LST ~ C + NDVI + NDBI; AQ ~ C + NDVI)
+        y calcula métricas de precisión (R^2, RMSE).
+        """
+        X = (
+            self.ndvi.rename("NDVI")
+            .addBands(self.ndbi.rename("NDBI"))
+            .addBands(ee.Image.constant(1).rename("C"))
+        )
+        feats = (
+            X.addBands(self.temp_image.rename("LST"))
+            .addBands(self.aq_index.rename("AQ"))
+            .sample(
+                region=self.region,
+                scale=sample_scale,
+                numPixels=n_samples,
+                geometries=False,
+                seed=seed,
+            )
+            .randomColumn("r", seed)
+        )
+
+        tr, te = feats.filter(ee.Filter.lt("r", train_frac)), feats.filter(
+            ee.Filter.gte("r", train_frac)
+        )
+
+        # Regresión LST
+        lst_reg = tr.reduceColumns(
+            ee.Reducer.linearRegression(3, 1), selectors=["C", "NDVI", "NDBI", "LST"]
+        )
+        B = ee.Array(lst_reg.get("coefficients"))
+        b0, b1, b2 = B.get([0, 0]), B.get([1, 0]), B.get([2, 0])
+        yhat_LST = te.map(
+            lambda f: f.set("y_true", f.get("LST")).set(
+                "y_pred",
+                ee.Number(b0)
+                .add(ee.Number(f.get("NDVI")).multiply(b1))
+                .add(ee.Number(f.get("NDBI")).multiply(b2)),
+            )
+        )
+        mL = ee.List(self._linreg_metrics(yhat_LST))
+        r2_LST, rmse_LST = ee.Number(mL.get(0)), ee.Number(mL.get(1))
+
+        # Regresión AQ
+        aq_reg = tr.reduceColumns(
+            ee.Reducer.linearRegression(2, 1), selectors=["C", "NDVI", "AQ"]
+        )
+        A = ee.Array(aq_reg.get("coefficients"))
+        a0, a1 = A.get([0, 0]), A.get([1, 0])
+        yhat_AQ = te.map(
+            lambda f: f.set("y_true", f.get("AQ")).set(
+                "y_pred", ee.Number(a0).add(ee.Number(f.get("NDVI")).multiply(a1))
+            )
+        )
+        mA = ee.List(self._linreg_metrics(yhat_AQ))
+        r2_AQ, rmse_AQ = ee.Number(mA.get(0)), ee.Number(mA.get(1))
+
+        # Almacenar resultados
+        self.reg_coefs = {"LST": [b0, b1, b2], "AQ": [a0, a1]}
+        self.metrics = {
+            "LST": {"r2": r2_LST, "rmse": rmse_LST},
+            "AQ": {"r2": r2_AQ, "rmse": rmse_AQ},
+        }
+        print(
+            f"Modelo LST: R^2={r2_LST.getInfo():.3f}, RMSE={rmse_LST.getInfo():.2f}°C"
+        )
+        print(f"Modelo AQ: R^2={r2_AQ.getInfo():.3f}, RMSE={rmse_AQ.getInfo():.2f}")
+
+    # --- Lógica de Modificadores (Adaptada para usar ee.Number en lugar de constantes) ---
+
+    def _attr_modifiers_real(
+        self, densidad: Dict[str, Any], trafico: Dict[str, Any], albedo: Dict[str, Any]
+    ) -> Tuple[ee.Number, ee.Number, ee.Number]:
+        """Calcula modificadores de NDVI, LST, y AQ basados en atributos residenciales/existentes."""
+        dmin, dmax = self._unit_range("densidad", densidad["unit"])
+        tmin, tmax = self._unit_range("trafico", trafico["unit"])
+        amin, amax = self._unit_range("albedo", albedo["unit"])
+
+        a_val = (
+            ee.Number(albedo["value"]).divide(100.0).clamp(0, 1)
+            if albedo["unit"] == "cool_roof_pct"
+            else ee.Number(albedo["value"])
+        )
+
+        d = self._norm_value(densidad["value"], dmin, dmax)
+        t = self._norm_value(trafico["value"], tmin, tmax)
+        a = self._norm_value(a_val, amin, amax)
+
+        ndvi_adj = ee.Number(0).subtract(d.multiply(0.12))
+        lst_extra = d.multiply(3.0).add(t.multiply(1.5)).subtract(a.multiply(5.0))
+        aq_extra = t.multiply(25.0).subtract(a.multiply(5.0))
+        return ndvi_adj, lst_extra, aq_extra
+
+    def _attr_modifiers_green(
+        self,
+        arboles: Dict[str, Any],
+        pasto: Dict[str, Any],
+        agua_bool: bool,
+        copa: Dict[str, Any],
+    ) -> Tuple[ee.Number, ee.Number, ee.Number]:
+        """Calcula modificadores de NDVI, LST, y AQ basados en atributos de área verde/propuesta."""
+        amin, amax = self._unit_range("arboles", arboles["unit"])
+        pmin, pmax = self._unit_range("pasto", pasto["unit"])
+        cmin, cmax = self._unit_range("copa", copa["unit"])
+
+        a_n = self._norm_value(arboles["value"], amin, amax)
+        p_n = self._norm_value(pasto["value"], pmin, pmax)
+        c_n = self._norm_value(copa["value"], cmin, cmax)
+
+        ndvi_adj = a_n.multiply(0.10).add(p_n.multiply(0.06)).add(c_n.multiply(0.18))
+        lst_extra = a_n.multiply(-2.0).add(p_n.multiply(-1.0)).add(c_n.multiply(-2.5))
+        aq_extra = a_n.multiply(-10.0).add(p_n.multiply(-4.0)).add(c_n.multiply(-8.0))
+
+        if agua_bool:
+            ndvi_adj = ndvi_adj.add(0.03)
+            lst_extra = lst_extra.add(-1.5)
+            aq_extra = aq_extra.add(-3.0)
+
+        # Aplicar clamps (ajustes para evitar valores extremos no realistas)
+        ndvi_adj = ee.Number(ndvi_adj).clamp(-0.20, 0.30)
+        lst_extra = ee.Number(lst_extra).clamp(-6.0, 6.0)
+        aq_extra = ee.Number(aq_extra).clamp(-25.0, 25.0)
+        return ndvi_adj, lst_extra, aq_extra
+
+    # --- Métodos de Predicción (Adaptados para aceptar geojson_area) ---
+
+    def _apply_simulation(
+        self,
+        ee_geometry: ee.Geometry,
+        ndvi_target: ee.Image,
+        lst_extra: ee.Number,
+        aq_extra: ee.Number,
+    ):
+        """Aplica los cambios de simulación a las capas base en la geometría dada."""
         mask = ee.Image(0).paint(ee_geometry, 1)
 
-        # Apply changes only where the mask is 1
-        sim_temp_op = (
-            self.base_temp.add(config["temp_val"])
-            if config["temp_op"] == "add"
-            else self.base_temp.subtract(config["temp_val"])
-        )
-        sim_temp = self.base_temp.where(mask, sim_temp_op)
+        # 1. Calcular nuevo NDVI
+        ndvi_new = self.ndvi.where(mask, ndvi_target)
 
-        sim_ndvi = self.base_ndvi.where(mask, ee.Image.constant(config["ndvi_val"]))
-
-        sim_aq_op = (
-            self.base_aq.add(config["aq_val"])
-            if config["aq_op"] == "add"
-            else self.base_aq.subtract(config["aq_val"])
-        )
-        sim_aq = self.base_aq.where(mask, sim_aq_op).clamp(0, 100)
-
-        return {
-            "temp": sim_temp,
-            "ndvi": sim_ndvi,
-            "aq": sim_aq
-        }
-
-    def calculate_impact_stats(self, preset, ee_geometry):
-        """
-        Calculates baseline and post-simulation stats for a given geometry and preset.
-        Returns a report with baseline, post-simulation, and delta values.
-        """
-
-        def mean_in_roi(img, band_name, scale):
-            """
-            Helper to compute the mean value of an image within the geometry.
-            Returns a float or None.
-            """
-            stat = (
-                img.select(band_name)
-                .reduceRegion(
-                    reducer=ee.Reducer.mean(),
-                    geometry=ee_geometry,
-                    scale=scale,
-                    maxPixels=1e12,
-                    bestEffort=True,
-                )
-                .get(band_name)
+        # 2. Aplicar modelos de regresión para LST y AQ
+        if self.reg_coefs is not None:
+            b0, b1, b2 = self.reg_coefs["LST"]
+            a0, a1 = self.reg_coefs["AQ"]
+            # LST: LST ~ C + NDVI + NDBI
+            lst_reg = (
+                ee.Image.constant(b0)
+                .add(ndvi_new.multiply(b1))
+                .add(self.ndbi.multiply(b2))
             )
-            return ee.Number(stat).getInfo()
+            # AQ: AQ ~ C + NDVI
+            aq_reg = ee.Image.constant(a0).add(ndvi_new.multiply(a1))
+        else:
+            # Modelo simple (LST ~ NDVI, AQ ~ NDVI)
+            s = self._fit_linear_models_simple()
+            lst_reg = ndvi_new.multiply(s["LST"]["a"]).add(s["LST"]["b"])
+            aq_reg = ndvi_new.multiply(s["AQ"]["a"]).add(s["AQ"]["b"])
 
-        # 1. Calculate Baseline Stats
-        baseline_stats = {
-            "temp_c_mean": mean_in_roi(self.base_temp, "LST_Day_1km", 1000),
-            "ndvi_mean": mean_in_roi(self.base_ndvi, "NDVI", 30),
-            "aq_mean_0_100": mean_in_roi(self.base_aq, "AQ_Composite_0_100", 1000)
+        # 3. Aplicar ajustes extra por atributos/factores
+        self.sim_ndvi = ndvi_new
+        self.sim_temp = lst_reg.where(mask, lst_reg.add(lst_extra)).rename(
+            "LST_Day_1km"
+        )
+        self.sim_aq = (
+            aq_reg.where(mask, aq_reg.add(aq_extra))
+            .clamp(0, 100)
+            .rename("AQ_Composite_0_100")
+        )
+
+    def predict_residential_with_real_attributes(
+        self,
+        geojson_area: Dict[str, Any],
+        densidad: Dict[str, Any],
+        trafico: Dict[str, Any],
+        albedo: Dict[str, Any],
+        date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
+    ):
+        """Predice el impacto de un área residencial con atributos reales específicos."""
+        ee_geom = self._geojson_to_ee_geom(geojson_area)
+        month = self._month(date_range_monthly[0])
+        ndvi_p = self._ndvi_percentiles_for_month(month)
+
+        # Objetivo NDVI: Percentil 50 ('residential')
+        ndvi_adj_base = ndvi_p.select("NDVI_p50").rename("NDVI_target").clamp(0, 1)
+
+        ndvi_adj, lst_extra, aq_extra = self._attr_modifiers_real(
+            densidad, trafico, albedo
+        )
+        ndvi_target = ndvi_adj_base.add(ndvi_adj).clamp(0, 1)
+
+        self._apply_simulation(ee_geom, ndvi_target, lst_extra, aq_extra)
+        print("Predicción residencial con atributos REALES calculada.")
+
+    def predict_green_area_with_attributes(
+        self,
+        geojson_area: Dict[str, Any],
+        arboles: Dict[str, Any],
+        pasto: Dict[str, Any],
+        agua: bool,
+        copa: Dict[str, Any],
+        date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
+    ):
+        """Predice el impacto de un área verde con atributos específicos."""
+        ee_geom = self._geojson_to_ee_geom(geojson_area)
+        month = self._month(date_range_monthly[0])
+        ndvi_p = self._ndvi_percentiles_for_month(month)
+
+        # Objetivo NDVI: Percentil 90 ('green_area')
+        ndvi_adj_base = ndvi_p.select("NDVI_p90").rename("NDVI_target").clamp(0, 1)
+
+        ndvi_adj, lst_extra, aq_extra = self._attr_modifiers_green(
+            arboles, pasto, agua, copa
+        )
+        ndvi_target = ndvi_adj_base.add(ndvi_adj).clamp(0, 1)
+
+        self._apply_simulation(ee_geom, ndvi_target, lst_extra, aq_extra)
+        print("Predicción de área verde con atributos calculada.")
+
+    def _predict_changes_historic_percentiles(
+        self,
+        geojson_area: Dict[str, Any],
+        preset: str,
+        date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
+    ):
+        """
+        Predice el impacto usando un preset histórico (p10/p50/p90).
+        ***MODIFICADO*** para manejar 'industrial' con valores fijos de ajuste.
+        """
+        ee_geom = self._geojson_to_ee_geom(geojson_area)
+        tgt = self._CFG["presets"].get(preset)
+        if not tgt:
+            print(
+                f"Preset '{preset}' inválido. Usa: {list(self._CFG['presets'].keys())}"
+            )
+            return
+
+        month = self._month(date_range_monthly[0])
+        ndvi_p = self._ndvi_percentiles_for_month(month)
+
+        # Objetivo NDVI (basado en percentil)
+        ndvi_target_image = ndvi_p.select(tgt).clamp(0, 1).rename("NDVI_target")
+
+        # Ajustes extra por LST y AQ
+        lst_extra = ee.Number(0)
+        aq_extra = ee.Number(0)
+
+        # Lógica especial para 'industrial' (replicando el comportamiento de GeoProcessor)
+        if preset == "industrial":
+            # Los valores de ajuste para industrial se toman de los atributos de la instancia.
+            # Nota: El GeoProcessor original simplemente reemplaza el NDVI con un valor fijo (0.05)
+            # y añade/sustrae un valor fijo a LST y AQ.
+            lst_extra = ee.Number(
+                self.temp_industry
+            )  # Asumimos que temp_industry es el *cambio* de temperatura
+            aq_extra = ee.Number(
+                self.aq_industry
+            )  # Asumimos que aq_industry es el *cambio* de AQ
+            print(
+                f"Preset 'industrial' aplicado: ΔTemp={self.temp_industry}, ΔAQ={self.aq_industry}"
+            )
+
+        elif preset == "residential":
+            # Comportamiento simple de 'residential' (solo cambia NDVI al p50, sin atributos extra)
+            # En GeoProcessor original, residential usaba +4 Temp y +20 AQ, pero aquí usamos 0 para mantener
+            # la distinción con el preset con atributos ('residential_real').
+            pass
+
+        elif preset == "green_area":
+            # Comportamiento simple de 'green_area' (solo cambia NDVI al p90, sin atributos extra)
+            # En GeoProcessor original, green_area usaba -5 Temp y -10 AQ.
+            # Si quieres ese comportamiento:
+            # lst_extra = ee.Number(-5)
+            # aq_extra = ee.Number(-10)
+            pass  # Mantener 0 para simplificar el modelo base.
+
+        self._apply_simulation(ee_geom, ndvi_target_image, lst_extra, aq_extra)
+
+    # --- Métodos de Reporte e Impacto (Adaptados para aceptar geojson_area) ---
+
+    def impact_report(
+        self,
+        geojson_area: Dict[str, Any],
+        preset: Union[str, Tuple[str, Dict[str, Any]]],
+        buffer_m: Optional[int] = None,
+        calibrate: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Calcula y reporta el impacto de una simulación (baseline vs. post-simulación)
+        para una geometría GeoJSON.
+        """
+        ee_geom = self._geojson_to_ee_geom(geojson_area)
+
+        if calibrate:
+            try:
+                self.calibrate_precision()
+            except Exception as e:
+                print(f"Calibración precisa falló, usando modelo simple: {e}")
+
+        # Aplicar buffer si es necesario
+        area = ee_geom.buffer(buffer_m) if buffer_m else ee_geom
+        if buffer_m:
+            print(
+                f"Análisis extendido {buffer_m/1000:.1f} km alrededor del área dibujada."
+            )
+
+        # --- 1. Calcular Baseline ---
+        base_stats = {
+            "temp_c_mean": self._mean(self.temp_image, 1000, area),
+            "ndvi_mean": self._mean(self.ndvi, 20, area),
+            "aq_mean": self._mean(self.aq_index, 5000, area),
         }
 
-        # 2. Get Simulated Images
-        sim_images = self._create_simulated_images(preset, ee_geometry)
-        if sim_images is None:
-            return None
+        # --- 2. Ejecutar Predicción ---
+        if (
+            isinstance(preset, tuple)
+            and len(preset) == 2
+            and preset[0] == "residential_real"
+        ):
+            attrs = preset[1] or {}
+            self.predict_residential_with_real_attributes(
+                geojson_area=geojson_area,  # Usar la geometría original para la simulación
+                densidad=attrs["densidad"],
+                trafico=attrs["trafico"],
+                albedo=attrs["albedo"],
+            )
+        elif (
+            isinstance(preset, tuple) and len(preset) == 2 and preset[0] == "green_real"
+        ):
+            attrs = preset[1] or {}
+            self.predict_green_area_with_attributes(
+                geojson_area=geojson_area,  # Usar la geometría original para la simulación
+                arboles=attrs["arboles"],
+                pasto=attrs["pasto"],
+                agua=attrs.get("agua", False),
+                copa=attrs["copa"],
+            )
+        else:
+            self._predict_changes_historic_percentiles(geojson_area, preset)
 
-        # 3. Calculate Post-Simulation Stats
+        # --- 3. Calcular Post-simulación ---
         post_stats = {
-            "temp_c_mean": mean_in_roi(sim_images["temp"], "LST_Day_1km", 1000),
-            "ndvi_mean": mean_in_roi(sim_images["ndvi"], "NDVI", 30),
-            "aq_mean_0_100": mean_in_roi(sim_images["aq"], "AQ_Composite_0_100", 1000)
+            "temp_c_mean": self._mean(self.sim_temp, 1000, area),
+            "ndvi_mean": self._mean(self.sim_ndvi, 20, area),
+            "aq_mean": self._mean(self.sim_aq, 5000, area),
         }
 
-        # 4. Calculate Deltas and assemble the final report
-        delta_stats = {
-            key: (
-                (post_stats[key] - baseline_stats[key])
-                if post_stats.get(key) is not None
-                and baseline_stats.get(key) is not None
-                else None
-            )
-            for key in baseline_stats
-        }
+        # --- 4. Obtener resultados y reportar ---
+        def _safe_fetch(m: ee.Dictionary, key: str) -> Optional[float]:
+            """Obtiene el valor de un diccionario EE y maneja errores."""
+            try:
+                return m.getInfo().get(key)
+            except Exception:
+                return None
 
-        return {
+        base_temp = _safe_fetch(base_stats["temp_c_mean"], "LST_Day_1km")
+        base_ndvi = _safe_fetch(base_stats["ndvi_mean"], "NDVI")
+        base_aq = _safe_fetch(base_stats["aq_mean"], "AQ_Composite_0_100")
+        post_temp = _safe_fetch(post_stats["temp_c_mean"], "LST_Day_1km")
+        post_ndvi = _safe_fetch(post_stats["ndvi_mean"], "NDVI")
+        post_aq = _safe_fetch(post_stats["aq_mean"], "AQ_Composite_0_100")
+
+        delta_temp = (
+            post_temp - base_temp
+            if (base_temp is not None and post_temp is not None)
+            else None
+        )
+        delta_ndvi = (
+            post_ndvi - base_ndvi
+            if (base_ndvi is not None and post_ndvi is not None)
+            else None
+        )
+        delta_aq = (
+            post_aq - base_aq if (base_aq is not None and post_aq is not None) else None
+        )
+
+        report = {
             "preset": preset,
-            "baseline": baseline_stats,
-            "post_simulation": post_stats,
-            "delta": delta_stats,
+            "baseline": {
+                "temp_c_mean": base_temp,
+                "ndvi_mean": base_ndvi,
+                "aq_mean_0_100": base_aq,
+            },
+            "post": {
+                "temp_c_mean": post_temp,
+                "ndvi_mean": post_ndvi,
+                "aq_mean_0_100": post_aq,
+            },
+            "delta": {
+                "temp_c_mean": delta_temp,
+                "ndvi_mean": delta_ndvi,
+                "aq_mean_0_100": delta_aq,
+            },
         }
+
+        if all(
+            v is not None
+            for v in [base_temp, post_temp, base_ndvi, post_ndvi, base_aq, post_aq]
+        ):
+            print("=== Reporte de Impacto ===")
+            print(f"Preset: {preset}")
+            print(f"Temp (°C): {base_temp:.2f} -> {post_temp:.2f} | Δ={delta_temp:.2f}")
+            print(f"NDVI:      {base_ndvi:.3f} -> {post_ndvi:.3f} | Δ={delta_ndvi:.3f}")
+            print(f"AQ (0–100):{base_aq:.1f}  -> {post_aq:.1f}  | Δ={delta_aq:.1f}")
+
+        return report

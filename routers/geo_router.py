@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 import ee
 from dotenv import load_dotenv
 import os
-from utils import GeoProcessor, best_model, industries, get_wind_speed
+from utils import GeoAnalytics, best_model, industries, get_wind_speed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,18 +47,16 @@ def get_simulation_report():
         co2 = data.get("co2", 0)
         ch4 = data.get("ch4", 0)
         n2o = data.get("n2o", 0)
+        densidad = data.get("densidad", 0)
+        trafico = data.get("trafico", 0)
+        albedo = data.get("albedo", 0)
+        arboles = data.get("arboles", 0)
+        pasto = data.get("pasto", 0)
+        agua = data.get("agua", False)
+        copa = data.get("copa", 0)
 
-        if not latitude or not longitude:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Missing required parameters: latitude and longitude",
-                        "payload": None,
-                    }
-                ),
-                400,
-            )
+        report = None
+
         if preset == "industrial":
             reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
             industries_vector = [0] * 43
@@ -77,22 +75,57 @@ def get_simulation_report():
             ]
             temp = best_model.predict(data_to_predict)
 
-            geoprocessor = GeoProcessor(
+            geoanalytics = GeoAnalytics(
                 latitude=latitude,
                 longitude=longitude,
                 buffer=buffer,
                 temp_industry=temp,
                 aq_industry=reported_emissions,
             )
-        else:
-            geoprocessor = GeoProcessor(
+            geoanalytics.calibrate_precision()
+            report = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset="industrial",
+                buffer_m=buffer,
+                calibrate=True,
+            )
+        elif preset == "green_real":
+            attrs_green = {
+                "arboles": {"value": arboles, "unit": "trees_per_ha"},
+                "pasto": {"value": pasto, "unit": "pct"},
+                "agua": agua,
+                "copa": {"value": copa, "unit": "pct"},
+            }
+            geoanalytics = GeoAnalytics(
                 latitude=latitude,
                 longitude=longitude,
                 buffer=buffer,
             )
 
-        ee_geometry = ee.Geometry(geometry)
-        report = geoprocessor.calculate_impact_stats(preset, ee_geometry)
+            reporte = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset=("green_real", attrs_green),
+                buffer_m=1000,
+                calibrate=False,
+            )
+        elif preset == "residential_real":
+            attrs_real = {
+                "densidad": {"value": densidad, "unit": "buildings_per_km2"},
+                "trafico": {"value": trafico, "unit": "veh_day"},
+                "albedo": {"value": albedo, "unit": "albedo_0_1"},
+            }
+            geoanalytics = GeoAnalytics(
+                latitude=latitude,
+                longitude=longitude,
+                buffer=buffer,
+            )
+
+            reporte = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset=("residential_real", attrs_real),
+                buffer_m=1000,
+                calibrate=False,
+            )
 
         if not report:
             return (
@@ -159,14 +192,14 @@ def get_initial_data(layer_name):
         longitude = float(longitude_str)
         buffer = int(buffer_str)
 
-        # Create a GeoProcessor instance
-        analyzer = GeoProcessor(latitude=latitude, longitude=longitude, buffer=buffer)
+        # Create a GeoAnalytics instance
+        analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
 
         # Map layer names to their corresponding images and visualization parameters
         layer_map = {
             "temp": (analyzer.base_temp, analyzer.temp_vis_params),
             "ndvi": (analyzer.base_ndvi, analyzer.ndvi_vis_params),
-            "aq": (analyzer.base_aq, analyzer.aq_vis_params)
+            "aq": (analyzer.base_aq, analyzer.aq_vis_params),
         }
 
         if layer_name in layer_map:
@@ -239,8 +272,8 @@ def get_simulation_tiles():
             geometry_str
         )  # NOTE: This may need to be parsed as geojson or WKT
 
-        # Create a GeoProcessor instance
-        geoprocessor = GeoProcessor(
+        # Create a GeoAnalytics instance
+        geoprocessor = GeoAnalytics(
             latitude=latitude,
             longitude=longitude,
             buffer=buffer,
@@ -277,7 +310,7 @@ def get_simulation_tiles():
                         ),
                         "sim_aq_url": geoprocessor.get_tile_url(
                             sim_images["aq"], geoprocessor.aq_vis_params
-                        )
+                        ),
                     },
                 }
             ),

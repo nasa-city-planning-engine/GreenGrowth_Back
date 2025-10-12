@@ -9,6 +9,7 @@ services:
     volumes:
       - ./secrets:/app/secrets:ro
       - backend_data:/app/instance
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]

@@ -13,6 +13,7 @@ cycler==0.12.1
 decorator==5.2.1
 earthengine-api==1.6.10
 eerepr==0.1.2
+et_xmlfile==2.0.0
 executing==2.2.1
 Flask==3.1.2
 flask-cors==6.0.1
@@ -51,6 +52,7 @@ matplotlib==3.10.6
 matplotlib-inline==0.1.7
 narwhals==2.6.0
 numpy==2.3.3
+openpyxl==3.1.5
 packaging==25.0
 pandas==2.3.3
 parso==0.8.5

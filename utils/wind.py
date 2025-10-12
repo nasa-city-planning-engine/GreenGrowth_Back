@@ -91,9 +91,9 @@ def get_wind_speed(lat, lon):
 # coords = {"lat": 19.4326, "lon": -99.1332} 
 # wind_data = get_wind_speed(coords["lat"], coords["lon"])
 
-print("\n--------------------------------------------------")
-print("🌬️ Array final para el Modelo:")
-print(f"# -- Wind Speed --")
-print(f"{wind_data[0]},           # Wind Speed 1km Radius")
-print(f"{wind_data[1]},           # Wind Speed 5km Radius")
-print(f"{wind_data[2]}            # Wind Speed 10km Radius")
+#print("\n--------------------------------------------------")
+#print("🌬️ Array final para el Modelo:")
+#print(f"# -- Wind Speed --")
+#print(f"{wind_data[0]},           # Wind Speed 1km Radius")
+#print(f"{wind_data[1]},           # Wind Speed 5km Radius")
+#print(f"{wind_data[2]}            # Wind Speed 10km Radius")

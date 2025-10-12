@@ -59,16 +59,21 @@ def get_simulation_report():
 
         if preset == "industrial":
             reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
-            industries_vector = [0] * 43
+            industries_vector = [0] * len(industries)
+            print(industries_vector)
             wind_speeds = get_wind_speed(lat=latitude, lon=longitude)
             if industries_used:
                 for i in industries_used:
-                    industries_vector[industries[i]] = 1
+                    if i in industries:
+                        print(industries[i])
+                        industries_vector[industries[i]] = 1
+                    else:
+                        print(f"Warning: Unknown industry '{i}' ignored.")
             data_to_predict = [
                 latitude,
                 longitude,
                 reported_emissions,
-                industries_vector,
+                *industries_vector,
                 wind_speeds["~1.5 km"],
                 wind_speeds["~5.5 km"],
                 wind_speeds["~9–10 km"],

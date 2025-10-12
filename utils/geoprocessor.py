@@ -107,9 +107,41 @@ class GeoAnalytics:
         self.aq_industry = aq_industry
 
         # Inicializar capas base al instanciar (similar a GeoProcessor)
+        self._initialize_vis_params()
         self._calculate_base_layers()
 
     # --- Métodos de utilidad estáticos y privados ---
+
+    def _initialize_vis_params(self):
+        """
+        Sets the visualization parameters for map tiles (temperature, NDVI, air quality).
+        """
+        self.temp_vis_params = {
+            "min": -5,
+            "max": 45,
+            "palette": [
+                "#000080",
+                "#0000FF",
+                "#00FFFF",
+                "#00FF00",
+                "#ADFF2F",
+                "#FFFF00",
+                "#FFA500",
+                "#FF4500",
+                "#FF0000",
+            ],
+        }
+        self.ndvi_vis_params = {
+            "min": 0,
+            "max": 0.7,
+            "palette": ["#ff0000", "#ffff00", "#00ff00", "#004d00"],
+        }
+        self.aq_vis_params = {
+            "min": 0,
+            "max": 100,
+            "palette": ["#2DC937", "#E7B416", "#E77D11", "#CC3232", "#6B1A6B"],
+        }
+        print("🎨 Visualization parameters initialized.")
 
     @staticmethod
     def _normalize(img: ee.Image, vmin: float, vmax: float, to: int = 100) -> ee.Image:
@@ -219,41 +251,77 @@ class GeoAnalytics:
         return normalized.rename("v")
 
     def _calculate_base_layers(self):
-        """Calcula todas las capas de datos base de Earth Engine."""
-        dm, dy = self._CFG["date_month"], self._CFG["date_year"]
+        """
+        Calculates all base data layers from Earth Engine.
+        This is run once on initialization to ensure API endpoints are responsive.
+        Layers: Temperature, NDVI (vegetation), Air Quality (composite index).
+        """
+        # Static date ranges for consistent results
+        date_range_monthly = ("2024-05-01", "2024-05-31")
+        date_range_annual = ("2023-01-01", "2023-12-31")
 
-        # 1. LST (°C)
-        self.temp_image = (
+        # 1. Temperature Layer
+        self.base_temp = (
             ee.ImageCollection("MODIS/061/MOD11A1")
             .filterBounds(self.region)
-            .filterDate(*dm)
+            .filterDate(*date_range_monthly)
             .median()
             .select("LST_Day_1km")
             .multiply(0.02)
             .subtract(273.15)
         )
 
-        # 2. Sentinel-2: NDVI & NDBI
-        s2 = (
+        # 2. NDVI (Vegetation) Layer
+        s2_image = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(self.region)
-            .filterDate(*dm)
+            .filterDate(*date_range_monthly)
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 10))
             .median()
         )
-        self.ndvi = s2.normalizedDifference(["B8", "B4"]).rename("NDVI")
-        self.ndbi = s2.expression(
-            "(swir - nir) / (swir + nir)",
-            {"swir": s2.select("B11"), "nir": s2.select("B8A")},
-        ).rename("NDBI")
+        self.base_ndvi = s2_image.normalizedDifference(["B8", "B4"]).rename("NDVI")
 
-        # 3. AQ proxy (0–100)
-        comps = []
-        for coll, (band, (vmin, vmax)) in self._CFG["aq_sources"].items():
-            img = self._get_normalized_gas(coll, band, vmin, vmax, dy)
-            comps.append(img.rename("v"))
-        self.aq_index = ee.ImageCollection(comps).mean().rename("AQ_Composite_0_100")
-        print("🌍 Capas base (Temp, NDVI, AQ) calculadas y listas.")
+        # 3. Comprehensive Air Quality Index Layer (5-component model)
+        aq_components = [
+            self._get_normalized_gas(
+                "COPERNICUS/S5P/NRTI/L3_NO2",
+                "NO2_column_number_density",
+                0.0,
+                2e-4,
+                date_range_annual,
+            ),
+            self._get_normalized_gas(
+                "COPERNICUS/S5P/NRTI/L3_SO2",
+                "SO2_column_number_density",
+                0.0,
+                1e-4,
+                date_range_annual,
+            ),
+            self._get_normalized_gas(
+                "COPERNICUS/S5P/NRTI/L3_O3",
+                "O3_column_number_density",
+                0.0,
+                3e-4,
+                date_range_annual,
+            ),
+            self._get_normalized_gas(
+                "COPERNICUS/S5P/NRTI/L3_CO",
+                "CO_column_number_density",
+                0.0,
+                3e-2,
+                date_range_annual,
+            ),
+            self._get_normalized_gas(
+                "COPERNICUS/S5P/NRTI/L3_AER_AI",
+                "absorbing_aerosol_index",
+                -1.0,
+                2.0,
+                date_range_annual,
+            ),
+        ]
+        self.base_aq = (
+            ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
+        )
 
     # --- Métodos de modelo y calibración ---
 

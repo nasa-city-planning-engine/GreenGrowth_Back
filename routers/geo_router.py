@@ -10,7 +10,8 @@ from flask import Blueprint, jsonify, request
 import ee
 from dotenv import load_dotenv
 import os
-from utils import GeoAnalytics, best_model, industries, get_wind_speed
+from utils import GeoAnalytics, best_model, get_wind_speed
+import numpy as np
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,12 +22,62 @@ geo_bp = Blueprint("geo", __name__, url_prefix="/geo")
 GWP_CH4 = 25
 GWP_N2O = 298
 
+industries = {
+    "Stationary Combustion": 0,
+    "Electricity Generation": 1,
+    "Adipic Acid Production": 2,
+    "Aluminum Production": 3,
+    "Ammonia Manufacturing": 4,
+    "Cement Production": 5,
+    "Electronics Manufacture": 6,
+    "Ferroalloy Production": 7,
+    "Fluorinated GHG Production": 8,
+    "Glass Production": 9,
+    "HCFC-22 Production and HFC-23 Destruction": 10,
+    "Hydrogen Production": 11,
+    "Iron and Steel Production": 12,
+    "Lead Production": 13,
+    "Lime Production": 14,
+    "Magnesium Production": 15,
+    "Miscellaneous Use of Carbonates": 16,
+    "Nitric Acid Production": 17,
+    "Petrochemical Production": 18,
+    "Petroleum Refining": 19,
+    "Phosphoric Acid Production": 20,
+    "Pulp and Paper Manufacturing": 21,
+    "Silicon Carbide Production": 22,
+    "Soda Ash Manufacturing": 23,
+    "SF6 from Electrical Equipment": 24,
+    "Titanium Dioxide Production": 25,
+    "Underground Coal Mines": 26,
+    "Zinc Production": 27,
+    "Municipal Landfills": 28,
+    "Industrial Wastewater Treatment": 29,
+    "Industrial Waste Landfills": 30,
+    "Offshore Production": 31,
+    "Natural Gas Processing": 32,
+    "Natural Gas Transmission/Compression": 33,
+    "Underground Natural Gas Storage": 34,
+    "Liquified Natural Gas Storage": 35,
+    "Liquified Natural Gas Import/Export Equipment": 36,
+    "Petroleum Refinery (Producer)": 37,
+    "Petroleum Product Importer": 38,
+    "Petroleum Product Exporter": 39,
+    "Natural Gas Liquids Fractionator": 40,
+    "Natural Gas Local Distribution Company (supply)": 41,
+    "Non-CO2 Industrial Gas Supply": 42,
+    "Carbon Dioxide (CO2) Supply": 43,
+    "Import and Export of Equipment Containing Fluorinated GHGs": 44,
+    "Injection of Carbon Dioxide": 45,
+    "Electric Transmission and Distribution Equipment": 46,
+}
 
 # Endpoint: /geo/simulate
 # Simulates an environmental impact report for a given location and parameters
 @geo_bp.post("/simulate")
 def get_simulation_report():
     data = request.get_json()
+    print("Incoming data:", data)
 
     if not data:
         return jsonify(
@@ -43,7 +94,7 @@ def get_simulation_report():
         preset = data.get("preset")
         geometry = data.get("geometry")
         buffer = data.get("buffer")
-        industries_used = data.get("industries", None)
+        industries_used = data.get("industries_used", [])
         co2 = data.get("co2", 0)
         ch4 = data.get("ch4", 0)
         n2o = data.get("n2o", 0)
@@ -60,7 +111,6 @@ def get_simulation_report():
         if preset == "industrial":
             reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
             industries_vector = [0] * len(industries)
-            print(industries_vector)
             wind_speeds = get_wind_speed(lat=latitude, lon=longitude)
             if industries_used:
                 for i in industries_used:
@@ -74,11 +124,14 @@ def get_simulation_report():
                 longitude,
                 reported_emissions,
                 *industries_vector,
-                wind_speeds["~1.5 km"],
-                wind_speeds["~5.5 km"],
-                wind_speeds["~9–10 km"],
+                wind_speeds[0],
+                wind_speeds[1],
+                wind_speeds[2],
             ]
-            temp = best_model.predict(data_to_predict)
+
+            x = np.array([data_to_predict], dtype=float)
+
+            temp = int(best_model.predict(x))
 
             geoanalytics = GeoAnalytics(
                 latitude=latitude,
@@ -87,7 +140,6 @@ def get_simulation_report():
                 temp_industry=temp,
                 aq_industry=reported_emissions,
             )
-            geoanalytics.calibrate_precision()
             report = geoanalytics.impact_report(
                 geojson_area=geometry,
                 preset="industrial",
@@ -107,7 +159,7 @@ def get_simulation_report():
                 buffer=buffer,
             )
 
-            reporte = geoanalytics.impact_report(
+            report = geoanalytics.impact_report(
                 geojson_area=geometry,
                 preset=("green_real", attrs_green),
                 buffer_m=1000,
@@ -125,7 +177,7 @@ def get_simulation_report():
                 buffer=buffer,
             )
 
-            reporte = geoanalytics.impact_report(
+            report = geoanalytics.impact_report(
                 geojson_area=geometry,
                 preset=("residential_real", attrs_real),
                 buffer_m=1000,

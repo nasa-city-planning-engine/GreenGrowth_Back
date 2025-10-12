@@ -34,55 +34,6 @@ try:
 except Exception as e:
     print(f"\nError al cargar la hoja: {e}")
 
-industries = {
-    "Electricity Generation": 0,
-    "Adipic Acid Production": 1,
-    "Aluminum Production": 2,
-    "Ammonia Manufacturing": 3,
-    "Cement Production": 4,
-    "Electronics Manufacture": 5,
-    "Ferroalloy Production": 6,
-    "Fluorinated GHG Production": 7,
-    "Glass Production": 8,
-    "HCFC-22 Production and HFC-23 Destruction": 9,
-    "Hydrogen Production": 10,
-    "Iron and Steel Production": 11,
-    "Lead Production": 12,
-    "Lime Production": 13,
-    "Magnesium Production": 14,
-    "Miscellaneous Use of Carbonates": 15,
-    "Nitric Acid Production": 16,
-    "Petrochemical Production": 17,
-    "Petroleum Refining": 18,
-    "Phosphoric Acid Production": 19,
-    "Pulp and Paper Manufacturing": 20,
-    "Silicon Carbide Production": 21,
-    "Soda Ash Manufacturing": 22,
-    "SF6 from Electrical Equipment": 23,
-    "Titanium Dioxide Production": 24,
-    "Underground Coal Mines": 25,
-    "Zinc Production": 26,
-    "Municipal Landfills": 27,
-    "Industrial Wastewater Treatment": 28,
-    "Industrial Waste Landfills": 29,
-    "Offshore Production": 30,
-    "Natural Gas Processing": 31,
-    "Natural Gas Transmission/Compression": 32,
-    "Underground Natural Gas Storage": 33,
-    "Liquified Natural Gas Storage": 34,
-    "Liquified Natural Gas Import/Export Equipment": 35,
-    "Petroleum Refinery (Producer)": 36,
-    "Petroleum Product Importer": 37,
-    "Petroleum Product Exporter": 38,
-    "Natural Gas Liquids Fractionator": 39,
-    "Natural Gas Local Distribution Company (supply)": 40,
-    "Non-CO2 Industrial Gas Supply": 41,
-    "Carbon Dioxide (CO2) Supply": 42,
-    "Import and Export of Equipment Containing Fluorinated GHGs": 43,
-    "Injection of Carbon Dioxide": 44,
-    "Electric Transmission and Distribution Equipment": 45,
-}
-
 
 df_ghg.columns = df_ghg.columns.str.strip()
 data_selected = [
@@ -543,13 +494,19 @@ pipeline = Pipeline(
     ]
 )
 
-param_distributions = {
-    "model__n_estimators": [100, 200, 300, 500],
-    "model__learning_rate": [0.01, 0.05, 0.1, 0.2],
-    "model__max_depth": [3, 5, 7],
-    "model__subsample": [0.7, 0.8, 0.9, 1.0],
-}
+# param_distributions = {
+#     "model__n_estimators": [100, 200, 300, 500],
+#     "model__learning_rate": [0.01, 0.05, 0.1, 0.2],
+#     "model__max_depth": [3, 5, 7],
+#     "model__subsample": [0.7, 0.8, 0.9, 1.0],
+# }
 
+param_distributions = {
+    "model__n_estimators": [100, 200],
+    "model__learning_rate": [0.01, 0.05],
+    "model__max_depth": [3, 5],
+    "model__subsample": [0.7, 0.8],
+}
 
 cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
 

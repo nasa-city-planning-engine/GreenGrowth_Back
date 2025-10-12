@@ -28,4 +28,4 @@ EXPOSE 5000
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+CMD ["sh", "-c", "flask init-db && flask run --host=0.0.0.0 --port=5000"]

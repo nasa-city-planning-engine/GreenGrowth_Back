@@ -494,19 +494,13 @@ pipeline = Pipeline(
     ]
 )
 
-# param_distributions = {
-#     "model__n_estimators": [100, 200, 300, 500],
-#     "model__learning_rate": [0.01, 0.05, 0.1, 0.2],
-#     "model__max_depth": [3, 5, 7],
-#     "model__subsample": [0.7, 0.8, 0.9, 1.0],
-# }
-
 param_distributions = {
-    "model__n_estimators": [100, 200],
-    "model__learning_rate": [0.01, 0.05],
-    "model__max_depth": [3, 5],
-    "model__subsample": [0.7, 0.8],
-}
+     "model__n_estimators": [100, 200, 300, 500],
+     "model__learning_rate": [0.01, 0.05, 0.1, 0.2],
+     "model__max_depth": [3, 5, 7],
+     "model__subsample": [0.7, 0.8, 0.9, 1.0],
+ }
+
 
 cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
 

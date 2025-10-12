@@ -133,7 +133,7 @@ class GeoAnalytics:
 
     @staticmethod
     def _normalize(img: ee.Image, vmin: float, vmax: float, to: int = 100) -> ee.Image:
-        """Normaliza una imagen al rango [0, to]."""
+        """Normalize one image from [0, to]."""
         return (
             img.subtract(vmin)
             .divide(ee.Number(vmax).subtract(vmin))
@@ -143,32 +143,32 @@ class GeoAnalytics:
 
     @staticmethod
     def _mean(img: ee.Image, scale: int, geom: ee.Geometry) -> ee.Dictionary:
-        """Calcula el valor medio de una imagen en una geometría."""
+        """Calculates the mean of one geometry image object"""
         return img.reduceRegion(
             ee.Reducer.mean(), geom, scale, maxPixels=1e13, bestEffort=True
         )
 
     @staticmethod
     def _geojson_to_ee_geom(geojson_area: Dict[str, Any]) -> ee.Geometry:
-        """Convierte un diccionario GeoJSON a una geometría de Earth Engine."""
+        """Converts a GeoJSON dictionary into Earth Engine geometry object."""
         return ee.Geometry(geojson_area)
 
     def _unit_range(self, var: str, unit: str) -> Tuple[ee.Number, ee.Number]:
-        """Obtiene el rango min/max para la unidad de una variable de atributo."""
+        """Gets the minimum and maximun from one variable."""
         cfg = self.attr_norm.get(var, {}).get(unit)
         if cfg is None:
-            raise ValueError(f"Unidad no soportada para {var}: {unit}")
+            raise ValueError(f"Unity not suported for {var}: {unit}")
         return ee.Number(cfg["min"]), ee.Number(cfg["max"])
 
     def _norm_value(
         self, x: Union[float, int, ee.Number], vmin: ee.Number, vmax: ee.Number
     ) -> ee.Number:
-        """Normaliza un valor escalar entre [0, 1]."""
+        """Normalize an scalar [0, 1]."""
         x = ee.Number(x)
         return x.subtract(vmin).divide(ee.Number(vmax).subtract(vmin)).clamp(0, 1)
 
     def _month(self, date_str: str) -> ee.Number:
-        """Extrae el mes de una cadena de fecha."""
+        """Extract the month from an object"""
         return ee.Date(date_str).get("month")
 
     def _ndvi_percentiles_for_month(self, month_int: ee.Number) -> ee.Image:
@@ -176,9 +176,8 @@ class GeoAnalytics:
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(self.region)
             .filter(ee.Filter.calendarRange(month_int, month_int, "month"))
-            # Filtro relajado también aquí
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 80))
-            .map(mask_s2_scl)  # <- CAMBIO: Usa la nueva función aquí también
+            .map(mask_s2_scl)  
         )
         ndvi_ic = s2.map(lambda i: i.normalizedDifference(["B8", "B4"]).rename("NDVI"))
         return ndvi_ic.reduce(ee.Reducer.percentile([10, 50, 90])).rename(
@@ -201,20 +200,17 @@ class GeoAnalytics:
         date_range: Tuple[str, str],
     ) -> ee.Image:
         """
-        Obtiene y normaliza una imagen de gas de Sentinel-5P usando datos OFFL.
-        Se elimina el filtro QA y se confía en el promedio anual para la robustez.
+        Get and normalize a gas image from Sentinel-5P using OFFL. Eliminates QA filter and uses anual mean for consistency. 
         """
 
         def apply_qa(img: ee.Image) -> ee.Image:
-            # SIMPLIFICADO: Simplemente selecciona la banda principal.
-            # El promedio anual sobre datos OFFL es suficiente para obtener un resultado robusto.
             return img.select(band)
 
         collection = (
             ee.ImageCollection(coll_id)
             .filterBounds(self.region)
             .filterDate(*date_range)
-            .map(apply_qa)  # Mapea la función simplificada
+            .map(apply_qa)  
             .mean()
         )
 
@@ -227,14 +223,13 @@ class GeoAnalytics:
         This is run once on initialization to ensure API endpoints are responsive.
         Layers: Temperature, NDVI (vegetation), Air Quality (composite index).
         """
-        # Rangos de fechas estáticos para resultados consistentes
         date_range_monthly = (
             "2024-05-01",
             "2024-07-31",
-        )  # Rango estacional para temperatura
-        date_range_annual = ("2023-01-01", "2023-12-31")  # Rango anual para NDVI y AQ
+        )  
+        date_range_annual = ("2023-01-01", "2023-12-31")  
 
-        # 1. Capa de Temperatura
+        #Heat layer
         self.base_temp = (
             ee.ImageCollection("MODIS/061/MOD11A1")
             .filterBounds(self.region)
@@ -244,27 +239,22 @@ class GeoAnalytics:
             .multiply(0.02)
             .subtract(273.15)
         )
-
-        # --- INICIO DEL CAMBIO ROBUSTO PARA NDVI ---
-        # 2. Capa de NDVI (Vegetación) - MÉTODO DE COMPUESTO ANUAL SIN NUBES
-        # Este método es mucho más fiable que buscar en un solo mes.
+        #NDVI layer
         s2_composite = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(self.region)
             .filterDate(*date_range_annual)
-            # Filtro relajado, ya que SCL se encargará del enmascaramiento preciso
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 80))
-            .map(mask_s2_scl)  # <- CAMBIO: Usa la nueva función de enmascaramiento
+            .map(mask_s2_scl)  
             .median()
         )
         self.base_ndvi = s2_composite.normalizedDifference(["B8", "B4"]).rename("NDVI")
         self.ndbi = s2_composite.normalizedDifference(["B11", "B8"]).rename("NDBI")
-        # --- FIN DEL CAMBIO ROBUSTO PARA NDVI ---
+    
 
-        # 3. Capa de Índice de Calidad del Aire
+        #Air quality layer
         aq_components = [
             self._get_normalized_gas(
-                # CAMBIO: NRTI -> OFFL
                 "COPERNICUS/S5P/OFFL/L3_NO2",
                 "tropospheric_NO2_column_number_density",
                 0.0,
@@ -272,7 +262,6 @@ class GeoAnalytics:
                 date_range_annual,
             ),
             self._get_normalized_gas(
-                # CAMBIO: NRTI -> OFFL
                 "COPERNICUS/S5P/OFFL/L3_SO2",
                 "SO2_column_number_density",
                 0.0,
@@ -280,7 +269,6 @@ class GeoAnalytics:
                 date_range_annual,
             ),
             self._get_normalized_gas(
-                # CAMBIO: NRTI -> OFFL
                 "COPERNICUS/S5P/OFFL/L3_O3",
                 "O3_column_number_density",
                 0.1,
@@ -288,7 +276,6 @@ class GeoAnalytics:
                 date_range_annual,
             ),
             self._get_normalized_gas(
-                # CAMBIO: NRTI -> OFFL
                 "COPERNICUS/S5P/OFFL/L3_CO",
                 "CO_column_number_density",
                 0.0,
@@ -296,7 +283,6 @@ class GeoAnalytics:
                 date_range_annual,
             ),
             self._get_normalized_gas(
-                # CAMBIO: NRTI -> OFFL
                 "COPERNICUS/S5P/OFFL/L3_AER_AI",
                 "absorbing_aerosol_index",
                 -1.0,
@@ -307,13 +293,11 @@ class GeoAnalytics:
         self.base_aq = (
             ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
         )
-        # Asigna las capas base a las propiedades de la instancia
         self.temp_image = self.base_temp
         self.ndvi = self.base_ndvi
         self.aq_index = self.base_aq
         print("🌍 Base layers calculated successfully.")
 
-    # --- Métodos de modelo y calibración (SIN CAMBIOS) ---
     def _fit_linear_models_simple(
         self, sample_scale: int = 250, n: int = 4000, seed: int = 13
     ) -> Dict[str, Dict[str, ee.Number]]:
@@ -345,7 +329,7 @@ class GeoAnalytics:
         y_true_key: str = "y_true",
         y_pred_key: str = "y_pred",
     ) -> ee.List:
-        """Calcula R^2 y RMSE a partir de una FeatureCollection de valores reales y predichos."""
+        """Calculates R^2 y RMSE from the FeatureCollection"""
         fc = features.filter(ee.Filter.notNull([y_true_key, y_pred_key]))
         y = ee.List(fc.aggregate_array(y_true_key))
         yhat = ee.List(fc.aggregate_array(y_pred_key))
@@ -385,12 +369,11 @@ class GeoAnalytics:
         seed: int = 42,
     ):
         """
-        Ajusta modelos de regresión lineal múltiple (LST ~ C + NDVI + NDBI; AQ ~ C + NDVI)
-        y calcula métricas de precisión (R^2, RMSE).
+        Adjust multiple linear reg models (LST ~ C + NDVI + NDBI; AQ ~ C + NDVI)
+        and the score metrics (R^2, RMSE).
         """
-        # Asegurarse que NDBI existe antes de usarlo.
         if self.ndbi is None:
-            print("NDBI no calculado, usando modelo simple para calibración.")
+            print("NDBI no calculated, using simple model for calibration.")
             return
 
         X = (
@@ -415,7 +398,7 @@ class GeoAnalytics:
             ee.Filter.gte("r", train_frac)
         )
 
-        # Regresión LST
+        #LST regression
         lst_reg = tr.reduceColumns(
             ee.Reducer.linearRegression(3, 1), selectors=["C", "NDVI", "NDBI", "LST"]
         )
@@ -432,7 +415,7 @@ class GeoAnalytics:
         mL = ee.List(self._linreg_metrics(yhat_LST))
         r2_LST, rmse_LST = ee.Number(mL.get(0)), ee.Number(mL.get(1))
 
-        # Regresión AQ
+        #Air quality regression
         aq_reg = tr.reduceColumns(
             ee.Reducer.linearRegression(2, 1), selectors=["C", "NDVI", "AQ"]
         )
@@ -446,7 +429,7 @@ class GeoAnalytics:
         mA = ee.List(self._linreg_metrics(yhat_AQ))
         r2_AQ, rmse_AQ = ee.Number(mA.get(0)), ee.Number(mA.get(1))
 
-        # Almacenar resultados
+        # Storing results
         self.reg_coefs = {"LST": [b0, b1, b2], "AQ": [a0, a1]}
         self.metrics = {
             "LST": {"r2": r2_LST, "rmse": rmse_LST},
@@ -457,11 +440,11 @@ class GeoAnalytics:
         )
         print(f"Modelo AQ: R^2={r2_AQ.getInfo():.3f}, RMSE={rmse_AQ.getInfo():.2f}")
 
-    # --- Lógica de Modificadores (SIN CAMBIOS) ---
+
     def _attr_modifiers_real(
         self, densidad: Dict[str, Any], trafico: Dict[str, Any], albedo: Dict[str, Any]
     ) -> Tuple[ee.Number, ee.Number, ee.Number]:
-        """Calcula modificadores de NDVI, LST, y AQ basados en atributos residenciales/existentes."""
+        """Calculates moddifiers of NDVI, LST, y AQ based on real data"""
         dmin, dmax = self._unit_range("densidad", densidad["unit"])
         tmin, tmax = self._unit_range("trafico", trafico["unit"])
         amin, amax = self._unit_range("albedo", albedo["unit"])
@@ -488,7 +471,7 @@ class GeoAnalytics:
         agua_bool: bool,
         copa: Dict[str, Any],
     ) -> Tuple[ee.Number, ee.Number, ee.Number]:
-        """Calcula modificadores de NDVI, LST, y AQ basados en atributos de área verde/propuesta."""
+        """Calculates modifiers of NDVI, LST, y AQ based on attributes from the green area proposal. """
         amin, amax = self._unit_range("arboles", arboles["unit"])
         pmin, pmax = self._unit_range("pasto", pasto["unit"])
         cmin, cmax = self._unit_range("copa", copa["unit"])
@@ -506,13 +489,11 @@ class GeoAnalytics:
             lst_extra = lst_extra.add(-1.5)
             aq_extra = aq_extra.add(-3.0)
 
-        # Aplicar clamps (ajustes para evitar valores extremos no realistas)
         ndvi_adj = ee.Number(ndvi_adj).clamp(-0.20, 0.30)
         lst_extra = ee.Number(lst_extra).clamp(-6.0, 6.0)
         aq_extra = ee.Number(aq_extra).clamp(-25.0, 25.0)
         return ndvi_adj, lst_extra, aq_extra
 
-    # --- Métodos de Predicción (SIN CAMBIOS) ---
     def _apply_simulation(
         self,
         ee_geometry: ee.Geometry,
@@ -520,13 +501,12 @@ class GeoAnalytics:
         lst_extra: ee.Number,
         aq_extra: ee.Number,
     ):
-        """Aplica los cambios de simulación a las capas base en la geometría dada."""
         mask = ee.Image(0).paint(ee_geometry, 1)
 
-        # 1. Calcular nuevo NDVI
+    
         ndvi_new = self.ndvi.where(mask, ndvi_target)
 
-        # 2. Aplicar modelos de regresión para LST y AQ
+        #Use the models for LST and AQ
         if self.reg_coefs is not None and self.ndbi is not None:
             b0, b1, b2 = self.reg_coefs["LST"]
             a0, a1 = self.reg_coefs["AQ"]
@@ -539,12 +519,12 @@ class GeoAnalytics:
             # AQ: AQ ~ C + NDVI
             aq_reg = ee.Image.constant(a0).add(ndvi_new.multiply(a1))
         else:
-            # Modelo simple (LST ~ NDVI, AQ ~ NDVI)
+            # Simple model (LST ~ NDVI, AQ ~ NDVI)
             s = self._fit_linear_models_simple()
             lst_reg = ndvi_new.multiply(s["LST"]["a"]).add(s["LST"]["b"])
             aq_reg = ndvi_new.multiply(s["AQ"]["a"]).add(s["AQ"]["b"])
 
-        # 3. Aplicar ajustes extra por atributos/factores
+        # Apply extra adjustments for external factors
         self.sim_ndvi = ndvi_new
         self.sim_temp = lst_reg.where(mask, lst_reg.add(lst_extra)).rename(
             "LST_Day_1km"
@@ -563,12 +543,12 @@ class GeoAnalytics:
         albedo: Dict[str, Any],
         date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
     ):
-        """Predice el impacto de un área residencial con atributos reales específicos."""
+        """Predicts impact on residencial zone"""
         ee_geom = self._geojson_to_ee_geom(geojson_area)
         month = self._month(date_range_monthly[0])
         ndvi_p = self._ndvi_percentiles_for_month(month)
 
-        # Objetivo NDVI: Percentil 50 ('residential')
+        # Target NDVI: Percentil 50 ('residential')
         ndvi_adj_base = ndvi_p.select("NDVI_p50").rename("NDVI_target").clamp(0, 1)
 
         ndvi_adj, lst_extra, aq_extra = self._attr_modifiers_real(
@@ -577,7 +557,7 @@ class GeoAnalytics:
         ndvi_target = ndvi_adj_base.add(ndvi_adj).clamp(0, 1)
 
         self._apply_simulation(ee_geom, ndvi_target, lst_extra, aq_extra)
-        print("Predicción residencial con atributos REALES calculada.")
+        print("Prediction of residential zone with real values.")
 
     def predict_green_area_with_attributes(
         self,
@@ -588,12 +568,12 @@ class GeoAnalytics:
         copa: Dict[str, Any],
         date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
     ):
-        """Predice el impacto de un área verde con atributos específicos."""
+        """Predicts impact on green areas"""
         ee_geom = self._geojson_to_ee_geom(geojson_area)
         month = self._month(date_range_monthly[0])
         ndvi_p = self._ndvi_percentiles_for_month(month)
 
-        # Objetivo NDVI: Percentil 90 ('green_area')
+        # Target NDVI: Percentil 90 ('green_area')
         ndvi_adj_base = ndvi_p.select("NDVI_p90").rename("NDVI_target").clamp(0, 1)
 
         ndvi_adj, lst_extra, aq_extra = self._attr_modifiers_green(
@@ -602,7 +582,7 @@ class GeoAnalytics:
         ndvi_target = ndvi_adj_base.add(ndvi_adj).clamp(0, 1)
 
         self._apply_simulation(ee_geom, ndvi_target, lst_extra, aq_extra)
-        print("Predicción de área verde con atributos calculada.")
+        print("Green Area prediction calculated.")
 
     def _predict_changes_historic_percentiles(
         self,
@@ -613,7 +593,7 @@ class GeoAnalytics:
         ee_geom = self._geojson_to_ee_geom(geojson_area)
         tgt = self._CFG["presets"].get(preset)
         if not tgt:
-            print(f"Preset '{preset}' inválido.")
+            print(f"Preset '{preset}' invalid.")
             return
 
         month = self._month(date_range_monthly[0])
@@ -628,12 +608,12 @@ class GeoAnalytics:
             lst_extra = ee.Number(self.temp_industry)
             aq_extra = ee.Number(self.aq_industry)
             print(
-                f"Preset 'industrial' aplicado: ΔTemp={self.temp_industry}, ΔAQ={self.aq_industry}"
+                f"Preset 'industrial' apply: ΔTemp={self.temp_industry}, ΔAQ={self.aq_industry}"
             )
 
         self._apply_simulation(ee_geom, ndvi_target_image, lst_extra, aq_extra)
 
-    # --- Métodos de Reporte e Impacto (SIN CAMBIOS) ---
+
     def impact_report(
         self,
         geojson_area: Dict[str, Any],
@@ -642,8 +622,8 @@ class GeoAnalytics:
         calibrate: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
-        Calcula y reporta el impacto de una simulación (baseline vs. post-simulación)
-        para una geometría GeoJSON.
+        Calculates and reports the impact of the  simulation (baseline vs. post-simulación)
+        in a geojson geometry
         """
         ee_geom = self._geojson_to_ee_geom(geojson_area)
 
@@ -651,12 +631,12 @@ class GeoAnalytics:
             try:
                 self.calibrate_precision()
             except Exception as e:
-                print(f"Calibración precisa falló, usando modelo simple: {e}")
+                print(f"Fine tunning fail, using simple model: {e}")
 
         area = ee_geom.buffer(buffer_m) if buffer_m else ee_geom
         if buffer_m:
             print(
-                f"Análisis extendido {buffer_m/1000:.1f} km alrededor del área dibujada."
+                f"Extended analyze {buffer_m/1000:.1f} km arround painted area."
             )
 
         # --- 1. Calcular Baseline ---
@@ -666,7 +646,7 @@ class GeoAnalytics:
             "aq_mean": self._mean(self.aq_index, 5000, area),
         }
 
-        # --- 2. Ejecutar Predicción ---
+        # Prediction time
         if (
             isinstance(preset, tuple)
             and len(preset) == 2
@@ -693,9 +673,9 @@ class GeoAnalytics:
         else:
             self._predict_changes_historic_percentiles(geojson_area, preset)
 
-        # --- 3. Calcular Post-simulación ---
+        # --- 3. Calculate post simulation ---
         if self.sim_temp is None or self.sim_ndvi is None or self.sim_aq is None:
-            print("Error: La simulación no produjo resultados válidos.")
+            print("Error: Simulation didn't generate valid values")
             return None
 
         post_stats = {
@@ -704,7 +684,7 @@ class GeoAnalytics:
             "aq_mean": self._mean(self.sim_aq, 5000, area),
         }
 
-        # --- 4. Obtener resultados y reportar ---
+        # --- 4. Getting results and reporting them back ---
         def _safe_fetch(m: ee.Dictionary, key: str) -> Optional[float]:
             try:
                 val = m.getInfo()

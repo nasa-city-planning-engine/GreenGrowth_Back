@@ -12,40 +12,27 @@ load_dotenv()
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
 
-# Guard EE initialization until it's actually needed. This prevents import-time
-# failures when the credentials file is missing (e.g., in lightweight tests or
-# during container startup before secrets are mounted).
-_EE_AVAILABLE = False
-_ee_key_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if _ee_key_file and os.path.exists(_ee_key_file):
-    try:
-        import ee
+credentials = ee.ServiceAccountCredentials(
+    email=None,
+    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+)
+ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+data = "data/ghgp_data_2023.xlsx"
 
-        credentials = ee.ServiceAccountCredentials(email=None, key_file=_ee_key_file)
-        ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
-        _EE_AVAILABLE = True
-    except Exception as init_exc:
-        print(f"⚠️ Earth Engine init failed in industry module: {init_exc}")
-else:
-    print(f"⚠️ GOOGLE_APPLICATION_CREDENTIALS not set or file not found for industry module: {_ee_key_file}")
+try:
+    data_sheets = pd.ExcelFile(data).sheet_names
+    print("Data_sheets found:", data_sheets)
+except Exception as e:
+    print(f"Error reading data: {e}")
 
-# Defer heavy data loading until runtime to avoid import-time overhead and
-# failures when data files are not present in some environments.
-data = "/app/data/ghgp_data_2023.xlsx"
+try:
+    sheet = data_sheets[0] if data_sheets else None
 
-def _safe_load_excel(path: str):
-    try:
-        data_sheets = pd.ExcelFile(path).sheet_names
-        print("Data_sheets found:", data_sheets)
-        sheet = data_sheets[0] if data_sheets else None
-        df_ghg = pd.read_excel(path, sheet_name=sheet, header=3)
-        print(df_ghg.info())
-        return df_ghg
-    except Exception as e:
-        print(f"Error reading industry data file {path}: {e}")
-        return None
+    df_ghg = pd.read_excel(data, sheet_name=sheet, header=3)
+    print(df_ghg.info())
 
-df_ghg = _safe_load_excel(data)
+except Exception as e:
+    print(f"\nError al cargar la hoja: {e}")
 
 industries = {
     "Electricity Generation": 0,
@@ -327,7 +314,7 @@ one_hot_encoded = df["Industry Type (subparts)"].str.get_dummies(sep=",")
 one_hot_encoded.columns = one_hot_encoded.columns.map(industry_subpart_decoder)
 df = pd.concat([df, one_hot_encoded], axis=1)
 
-data_2 = "/app/data/ghg_data_with_lst.csv"
+data_2 = "data/ghg_data_with_lst.csv"
 
 try:
     df_2 = pd.read_csv(data_2)
@@ -335,7 +322,7 @@ try:
 except Exception as e:
     print(f"\nError al cargar el CSV: {e}")
 
-data_wind = "/app/data/export_facility_wind_data.csv"
+data_wind = "data/export_facility_wind_data.csv"
 
 try:
     df_3 = pd.read_csv(data_wind)

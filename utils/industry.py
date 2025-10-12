@@ -18,7 +18,7 @@ credentials = ee.ServiceAccountCredentials(
     key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 )
 ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
-data = "../data/ghgp_data_2023.xlsx"
+data = "data/ghgp_data_2023.xlsx"
 
 try:
     data_sheets = pd.ExcelFile(data).sheet_names
@@ -315,7 +315,7 @@ one_hot_encoded = df["Industry Type (subparts)"].str.get_dummies(sep=",")
 one_hot_encoded.columns = one_hot_encoded.columns.map(industry_subpart_decoder)
 df = pd.concat([df, one_hot_encoded], axis=1)
 
-data_2 = "../data/ghg_data_with_lst.csv"
+data_2 = "data/ghg_data_with_lst.csv"
 
 try:
     df_2 = pd.read_csv(data_2)
@@ -323,7 +323,7 @@ try:
 except Exception as e:
     print(f"\nError al cargar el CSV: {e}")
 
-data_wind = "../data/export_facility_wind_data.csv"
+data_wind = "data/export_facility_wind_data.csv"
 
 try:
     df_3 = pd.read_csv(data_wind)

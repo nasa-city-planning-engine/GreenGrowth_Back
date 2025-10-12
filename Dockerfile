@@ -16,9 +16,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
     apt-get update && apt-get install -y google-cloud-cli
 
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
-
+COPY data /app/data
 COPY . .
 
 

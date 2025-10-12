@@ -75,20 +75,7 @@ class GeoProcessor:
             "max": 100,
             "palette": ["#2DC937", "#E7B416", "#E77D11", "#CC3232", "#6B1A6B"],
         }
-        self.water_quality_vis_params = {
-            "min": 0,
-            "max": 100,
-            "palette": [
-                "#0d47a1",
-                "#1976d2",
-                "#42a5f5",
-                "#90caf9",
-                "#ffeb3b",
-                "#ffa726",
-                "#ff5722",
-                "#d32f2f",
-            ],
-        }
+
         print("🎨 Visualization parameters initialized.")
 
     def _calculate_base_layers(self):
@@ -163,52 +150,6 @@ class GeoProcessor:
         self.base_aq = (
             ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
         )
-
-        # Water Quality Layer
-        s2_water = (
-            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-            .filterBounds(self.region)
-            .filterDate(*date_range_monthly)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 10))
-            .median()
-        )
-
-        # Normalize bands to 0-1 range (sentinel-2 scale factor)
-        b2 = s2_water.select("B2").multiply(0.0001)  # Blue
-        b3 = s2_water.select("B3").multiply(0.0001)  # Green
-        b4 = s2_water.select("B4").multiply(0.0001)
-        b8 = s2_water.select("B8").multiply(0.0001)  # NIR
-
-        # 1. NDWI (Normalized Difference Water Index) - water detection
-        ndwi = s2_water.normalizedDifference(["B3", "B8"]).rename("NDWI")
-        water_mask = ndwi.gt(0.1)  # Only areas with NDWI > 0.1 (water bodies)
-
-        # 2. Turbidity Index (normalized Red band, scaled to 0-100)
-        turbidity = b4.subtract(0.02).divide(0.13).multiply(100).clamp(0, 100)
-
-        # 3. Chlorophyll-a proxy (Blue/Green ratio, inverted and scaled)
-        chlorophyll_ratio = b2.divide(b3.add(0.001))  # Avoid division by zero
-        chlorophyll = (
-            ee.Image(1.2).subtract(chlorophyll_ratio).multiply(100).clamp(0, 100)
-        )
-
-        # 4. Suspended Sediment Index (Red/Green ratio, scaled)
-        sediment_ratio = b4.divide(b3.add(0.001))
-        suspended_sediment = (
-            sediment_ratio.subtract(0.5).divide(0.7).multiply(100).clamp(0, 100)
-        )
-
-        # Composite Water Quality Index (0-100 scale, lower is better)
-        wqi_raw = (
-            turbidity.multiply(0.5)
-            .add(chlorophyll.multiply(0.25))
-            .add(suspended_sediment.multiply(0.25))
-        )
-
-        self.base_water_quality = wqi_raw.updateMask(water_mask).rename(
-            "Water_Quality_Index"
-        )
-        print("💧 Water Quality layer calculated and ready.")
 
     def _get_normalized_gas(self, coll_id, band, vmin, vmax, date_range):
         """
@@ -302,13 +243,10 @@ class GeoProcessor:
         )
         sim_aq = self.base_aq.where(mask, sim_aq_op).clamp(0, 100)
 
-        sim_water_quality = self.base_water_quality.where(mask, ee.Image.constant(0))
-
         return {
             "temp": sim_temp,
             "ndvi": sim_ndvi,
-            "aq": sim_aq,
-            "water_quality": sim_water_quality,
+            "aq": sim_aq
         }
 
     def calculate_impact_stats(self, preset, ee_geometry):
@@ -339,10 +277,7 @@ class GeoProcessor:
         baseline_stats = {
             "temp_c_mean": mean_in_roi(self.base_temp, "LST_Day_1km", 1000),
             "ndvi_mean": mean_in_roi(self.base_ndvi, "NDVI", 30),
-            "aq_mean_0_100": mean_in_roi(self.base_aq, "AQ_Composite_0_100", 1000),
-            "water_quality_mean": mean_in_roi(
-                self.base_water_quality, "Water_Quality_Index", 30
-            ),
+            "aq_mean_0_100": mean_in_roi(self.base_aq, "AQ_Composite_0_100", 1000)
         }
 
         # 2. Get Simulated Images
@@ -354,10 +289,7 @@ class GeoProcessor:
         post_stats = {
             "temp_c_mean": mean_in_roi(sim_images["temp"], "LST_Day_1km", 1000),
             "ndvi_mean": mean_in_roi(sim_images["ndvi"], "NDVI", 30),
-            "aq_mean_0_100": mean_in_roi(sim_images["aq"], "AQ_Composite_0_100", 1000),
-            "water_quality_mean": mean_in_roi(
-                sim_images["water_quality"], "Water_Quality_Index", 30
-            ),
+            "aq_mean_0_100": mean_in_roi(sim_images["aq"], "AQ_Composite_0_100", 1000)
         }
 
         # 4. Calculate Deltas and assemble the final report

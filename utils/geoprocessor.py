@@ -165,6 +165,13 @@ class GeoAnalytics:
             ["NDVI_p10", "NDVI_p50", "NDVI_p90"]
         )
 
+    def get_tile_url(self, image, vis_params):
+        """
+        Generates a tile URL for a given Earth Engine image and visualization parameters.
+        """
+        map_id = image.clip(self.region).getMapId(vis_params)
+        return map_id["tile_fetcher"].url_format
+
     def _get_normalized_gas(
         self,
         coll_id: str,

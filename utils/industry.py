@@ -6,7 +6,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from dotenv import load_dotenv
 import os
-
+import ee
 load_dotenv()
 
 

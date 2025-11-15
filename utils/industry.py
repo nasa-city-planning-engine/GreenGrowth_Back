@@ -1,3 +1,6 @@
+#The following code was commented, but this ilustrates how industry_model.pkl was generated
+
+"""
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, KFold, RandomizedSearchCV
@@ -525,3 +528,4 @@ print(random_search.best_params_)
 best_model = random_search.best_estimator_
 final_score = best_model.score(x_test, y_test)
 print(f"\nFinal R² score on the unseen test set: {final_score:.4f}")
+"""

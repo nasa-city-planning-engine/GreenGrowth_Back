@@ -6,37 +6,6 @@ import os
 
 load_dotenv()
 
-project_id = os.getenv("GEE_PROJECT")
-key_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-
-print("="*30)
-print(f"DEBUG: GEE_PROJECT leído: {project_id}")
-print(f"DEBUG: GEE_CREDS_PATH leído: {key_path}")
-print("="*30)
-
-if not project_id:
-    raise ValueError("Error: La variable de entorno 'GEE_PROJECT' no está definida.")
-if not key_path:
-    raise ValueError("Error: La variable de entorno 'GOOGLE_APPLICATION_CREDENTIALS' no está definida.")
-
-try:
-    credentials = ee.ServiceAccountCredentials(None, key_file=key_path)
-
-    ee.Initialize(
-        credentials=credentials,
-        project=project_id,
-        opt_url='https://earthengine-highvolume.googleapis.com'
-    )
-    
-    print("✅ GEE INICIALIZADO EXPLÍCITAMENTE CON ÉXITO.")
-
-except Exception as e:
-    print(f"ERROR AL INICIALIZAR GEE EXPLÍCITAMENTE: {e}")
-
-    raise e
-
-
 def get_wind_speed(lat, lon):
     """
     Obtains wind speed for the industrial prediction model

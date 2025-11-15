@@ -5,12 +5,7 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
-# Inicializar Earth Engine (se mantiene la inicialización)
-credentials = ee.ServiceAccountCredentials(
-    email=None,
-    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-)
-ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+ee.Initialize(project=os.getenv("GEE_PROJECT"))
 
 
 def get_wind_speed(lat, lon):

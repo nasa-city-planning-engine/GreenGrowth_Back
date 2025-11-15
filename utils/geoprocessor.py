@@ -66,12 +66,8 @@ _GA_CFG = {
     },
 }
 
-load_dotenv()
-credentials = ee.ServiceAccountCredentials(
-    email=None,
-    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-)
-ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+
+ee.Initialize(project=os.getenv("GEE_PROJECT"))
 
 
 # --- FUNCIÓN HELPER PARA ENMASCARAR NUBES ---

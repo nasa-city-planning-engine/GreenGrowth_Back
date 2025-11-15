@@ -12,11 +12,7 @@ load_dotenv()
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
 import ee
-credentials = ee.ServiceAccountCredentials(
-    email=None,
-    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-)
-ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+ee.Initialize(project=os.getenv("GEE_PROJECT"))
 data = "data/ghgp_data_2023.xlsx"
 
 try:

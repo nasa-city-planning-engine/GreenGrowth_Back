@@ -10,8 +10,10 @@ from flask import Blueprint, jsonify, request
 import ee
 from dotenv import load_dotenv
 import os
-from utils import GeoAnalytics, best_model, get_wind_speed
+from utils import GeoAnalytics, get_wind_speed
 import numpy as np
+import pickle
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -130,8 +132,12 @@ def get_simulation_report():
             ]
 
             x = np.array([data_to_predict], dtype=float)
+            
 
-            temp = int(best_model.predict(x))
+            with open('\ML_Models\industry_model.pkl', 'rb') as file: 
+                model = pickle.load(file)
+            
+            temp = int(model.predict(x))
 
             geoanalytics = GeoAnalytics(
                 latitude=latitude,

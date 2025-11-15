@@ -1,3 +1,6 @@
+#The following code was commented, but this ilustrates how industry_model.pkl was generated
+
+"""
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, KFold, RandomizedSearchCV
@@ -6,17 +9,13 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from dotenv import load_dotenv
 import os
-
+import ee
 load_dotenv()
+
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
-import ee
-credentials = ee.ServiceAccountCredentials(
-    email=None,
-    key_file=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-)
-ee.Initialize(credentials=credentials, project=os.getenv("GEE_PROJECT"))
+
 data = "data/ghgp_data_2023.xlsx"
 
 try:
@@ -529,3 +528,4 @@ print(random_search.best_params_)
 best_model = random_search.best_estimator_
 final_score = best_model.score(x_test, y_test)
 print(f"\nFinal R² score on the unseen test set: {final_score:.4f}")
+"""

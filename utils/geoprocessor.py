@@ -96,7 +96,6 @@ _GA_CFG = {
 }
 
 
-ee.Initialize(project=os.getenv("GEE_PROJECT"))
 
 
 # --- FUNCIÓN HELPER PARA ENMASCARAR NUBES ---

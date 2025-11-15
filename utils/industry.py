@@ -12,8 +12,7 @@ load_dotenv()
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
-import ee
-ee.Initialize(project=os.getenv("GEE_PROJECT"))
+
 data = "data/ghgp_data_2023.xlsx"
 
 try:

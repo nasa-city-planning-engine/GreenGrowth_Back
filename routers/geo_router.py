@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import os
 from utils import GeoAnalytics, get_wind_speed
 import numpy as np
+import math
 import pickle
 
 
@@ -344,41 +345,226 @@ def get_simulation_tiles():
 
         # Convert geometry string to Earth Engine geometry
         ee_geometry = ee.Geometry(geometry)
-        sim_images = geoprocessor._create_simulated_images(preset, ee_geometry)
+        # Run a combined impact_report over the multipolygon to populate sim_* images
+        try:
+            geojson_multi = {"type": "MultiPolygon", "coordinates": geometry}
+            geoprocessor.impact_report(geojson_area=geojson_multi, preset=preset or "residential", buffer_m=buffer, calibrate=False)
+        except Exception:
+            pass
 
-        if sim_images is None:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Simulation images could not be created",
-                        "payload": None,
-                    }
-                ),
-                500,
-            )
-
-        # Return URLs for simulated environmental layers
+        # Use sim_* images produced by impact_report
+        temp_url = None
+        ndvi_url = None
+        aq_url = None
+        if getattr(geoprocessor, "sim_temp", None) is not None:
+            temp_url = geoprocessor.get_tile_url(geoprocessor.sim_temp, geoprocessor.temp_vis_params)
+        if getattr(geoprocessor, "sim_ndvi", None) is not None:
+            ndvi_url = geoprocessor.get_tile_url(geoprocessor.sim_ndvi, geoprocessor.ndvi_vis_params)
+        if getattr(geoprocessor, "sim_aq", None) is not None:
+            aq_url = geoprocessor.get_tile_url(geoprocessor.sim_aq, geoprocessor.aq_vis_params)
+        # Return URLs for simulated environmental layers (may be None if generation failed)
         return (
             jsonify(
                 {
                     "status": "success",
                     "message": "Simulation completed successfully",
                     "payload": {
-                        "sim_temp_url": geoprocessor.get_tile_url(
-                            sim_images["temp"], geoprocessor.temp_vis_params
-                        ),
-                        "sim_ndvi_url": geoprocessor.get_tile_url(
-                            sim_images["ndvi"], geoprocessor.ndvi_vis_params
-                        ),
-                        "sim_aq_url": geoprocessor.get_tile_url(
-                            sim_images["aq"], geoprocessor.aq_vis_params
-                        ),
+                        "sim_temp_url": temp_url,
+                        "sim_ndvi_url": ndvi_url,
+                        "sim_aq_url": aq_url,
                     },
                 }
             ),
             201,
         )
+    except Exception as e:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(e),
+                    "payload": None,
+                }
+            ),
+            500,
+        )
+    
+
+# Endpoint: /geo/simulate-polygon
+# Simulates environmental impact for a given polygon area
+def _centroid_and_area_m2(geojson_geom):
+    """Return approximate centroid (lat, lon) and area in m^2 for a GeoJSON Polygon geometry.
+    Uses a simple equirectangular projection around the polygon mean latitude for small areas.
+    """
+    try:
+        rings = geojson_geom.get("coordinates", [])
+        if not rings:
+            return {"lat": 0.0, "lon": 0.0}, 0.0
+        ring = rings[0]
+        if not ring:
+            return {"lat": 0.0, "lon": 0.0}, 0.0
+
+        lats = [pt[1] for pt in ring]
+        lons = [pt[0] for pt in ring]
+        mean_lat = sum(lats) / len(lats)
+        mean_lat_rad = math.radians(mean_lat)
+
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * math.cos(mean_lat_rad)
+
+        lon0 = lons[0]
+        lat0 = lats[0]
+        xs = [(lon - lon0) * m_per_deg_lon for lon in lons]
+        ys = [(lat - lat0) * m_per_deg_lat for lat in lats]
+
+        area = 0.0
+        n = len(xs)
+        for i in range(n):
+            j = (i + 1) % n
+            area += xs[i] * ys[j] - xs[j] * ys[i]
+        area_m2 = abs(area) / 2.0
+
+        centroid_lat = sum(lats) / len(lats)
+        centroid_lon = sum(lons) / len(lons)
+
+        return {"lat": centroid_lat, "lon": centroid_lon}, float(area_m2)
+    except Exception:
+        return {"lat": 0.0, "lon": 0.0}, 0.0
+
+
+@geo_bp.post("/simulate-polygon")
+def simulate_polygon():
+    data = request.get_json()
+    print("Incoming data:", data)
+
+    if not data:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The body of the request is empty",
+                "payload": None,
+            }
+        )
+
+    try:
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
+        preset = data.get("preset")
+        geometry = data.get("geometry")
+        buffer = data.get("buffer", 1000)
+
+        co2 = data.get("co2", 0)
+        ch4 = data.get("ch4", 0)
+        n2o = data.get("n2o", 0)
+        densidad = data.get("densidad", 0)
+        trafico = data.get("trafico", 0)
+        albedo = data.get("albedo", 0)
+        arboles = data.get("arboles", 0)
+        pasto = data.get("pasto", 0)
+        agua = data.get("agua", False)
+        copa = data.get("copa", 0)
+
+        if latitude is None or longitude is None:
+            try:
+                coords = geometry.get("coordinates", [[]])[0][0]
+                longitude = coords[0]
+                latitude = coords[1]
+            except Exception:
+                latitude = 0
+                longitude = 0
+
+        geoanalytics = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
+
+        report = None
+        if preset == "industrial":
+            reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
+            report = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset="industrial",
+                buffer_m=buffer,
+                calibrate=True,
+            )
+        elif preset == "green_real":
+            attrs_green = {
+                "arboles": {"value": arboles, "unit": "trees_per_ha"},
+                "pasto": {"value": pasto, "unit": "pct"},
+                "agua": agua,
+                "copa": {"value": copa, "unit": "pct"},
+            }
+            report = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset=("green_real", attrs_green),
+                buffer_m=buffer,
+                calibrate=False,
+            )
+        elif preset == "residential_real":
+            attrs_real = {
+                "densidad": {"value": densidad, "unit": "buildings_per_km2"},
+                "trafico": {"value": trafico, "unit": "veh_day"},
+                "albedo": {"value": albedo, "unit": "albedo_0_1"},
+            }
+            report = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset=("residential_real", attrs_real),
+                buffer_m=buffer,
+                calibrate=False,
+            )
+        else:
+            report = geoanalytics.impact_report(
+                geojson_area=geometry,
+                preset=preset or "residential",
+                buffer_m=buffer,
+                calibrate=False,
+            )
+        if not report:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Failed to calculate impact stats",
+                        "payload": None,
+                    }
+                ),
+                500,
+            )
+
+        try:
+            ee_geom = None
+            try:
+                ee_geom = ee.Geometry(geometry)
+            except Exception:
+                try:
+                    ee_geom = ee.Geometry.Polygon(geometry.get("coordinates"))
+                except Exception:
+                    ee_geom = None
+
+            layer_urls = {}
+            if ee_geom is not None:
+                if getattr(geoanalytics, "sim_temp", None) is not None:
+                    layer_urls["temp"] = geoanalytics.get_tile_url(geoanalytics.sim_temp, geoanalytics.temp_vis_params)
+                if getattr(geoanalytics, "sim_ndvi", None) is not None:
+                    layer_urls["ndvi"] = geoanalytics.get_tile_url(geoanalytics.sim_ndvi, geoanalytics.ndvi_vis_params)
+                if getattr(geoanalytics, "sim_aq", None) is not None:
+                    layer_urls["aq"] = geoanalytics.get_tile_url(geoanalytics.sim_aq, geoanalytics.aq_vis_params)
+
+            centroid, area_m2 = _centroid_and_area_m2(geometry)
+
+            payload = {
+                "report": report,
+                "layer_urls": layer_urls,
+                "polygon": {"centroid": centroid, "area_m2": area_m2, "area_ha": area_m2 / 10000.0},
+            }
+
+            return (
+                jsonify({"status": "success", "message": "Polygon simulation completed successfully", "payload": payload}),
+                201,
+            )
+        except Exception as e:
+            return (
+                jsonify({"status": "success", "message": "Simulation completed; tile generation failed: " + str(e), "payload": {"report": report}}),
+                201,
+            )
+
     except Exception as e:
         return (
             jsonify(

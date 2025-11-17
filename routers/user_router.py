@@ -186,3 +186,50 @@ def get_user_messages(user_id):
         )
     except Exception as e:
         return jsonify({"status": "error", "message": str(e), "payload": None}), 500
+
+
+# Endpoint: POST /users/login
+# Login a user with username and password
+@user_bp.post("/login")
+def login_user():
+    data = request.get_json()
+
+    if not data:
+        return (
+            jsonify({
+                "status": "error",
+                "message": "The body of the request is empty",
+                "payload": None,
+            }),
+            400,
+        )
+
+    try:
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return (
+                jsonify({"status": "error", "message": "Missing username or password", "payload": None}),
+                400,
+            )
+
+        user = User.query.filter_by(username=username).first()
+
+        if not user or user.password != password:
+            return (
+                jsonify({"status": "error", "message": "Invalid username or password", "payload": None}),
+                401,
+            )
+
+        # Authentication successful
+        return (
+            jsonify({
+                "status": "success",
+                "message": f"User {user.username} logged in successfully",
+                "payload": {"id": user.id, "username": user.username, "email": user.email},
+            }),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e), "payload": None}), 500

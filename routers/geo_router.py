@@ -265,16 +265,18 @@ def get_initial_data(layer_name):
             "ndvi": (analyzer.base_ndvi, analyzer.ndvi_vis_params),
             "aq": (analyzer.base_aq, analyzer.aq_vis_params),
         }
+     
 
         if layer_name in layer_map:
             image, params = layer_map[layer_name]
             url = analyzer.get_tile_url(image, params)
+
             return (
                 jsonify(
                     {
                         "status": "success",
                         "message": "Initial data retrieved successfully",
-                        "payload": {"url": url, "layer": layer_name},
+                        "payload": {"url": url, "layer": layer_name}
                     }
                 ),
                 201,
@@ -302,6 +304,33 @@ def get_initial_data(layer_name):
             500,
         )
 
+@geo_bp.get("/get-kpis")
+def getKpis(): 
+    data = request.args
+    try: 
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
+        buffer = data.get("buffer")
+        if not latitude or not longitude or not buffer: 
+            return jsonify({"status": "error", "message": "Missing params"}), 400      
+
+        analyzer = GeoAnalytics(
+            latitude=float(latitude), 
+            longitude=float(longitude), 
+            buffer=int(buffer)
+        )
+        kpis = analyzer.get_initial_kpis()
+        if kpis is None:
+            return jsonify({"status": "error", "message": "Failed to calculate KPIs"}), 500
+        
+        return jsonify({
+            "status": "success",
+            "message": "KPIs calculated successfully",
+            "payload": kpis
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500 
 
 # Endpoint: /geo/simulate-tiles
 # Simulates and returns tile URLs for different environmental layers

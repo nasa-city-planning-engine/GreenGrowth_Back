@@ -16,9 +16,9 @@ print(f"DEBUG: GEE_CREDS_PATH leído: {key_path}")
 print("="*30)
 
 if not project_id:
-    raise ValueError("Error: La variable de entorno 'GEE_PROJECT' no está definida.")
+    raise ValueError("Variable 'GEE_PROJECT' is not defined, please check your env variables")
 if not key_path:
-    raise ValueError("Error: La variable de entorno 'GOOGLE_APPLICATION_CREDENTIALS' no está definida.")
+    raise ValueError("Variable 'GOOGLE_APPLICATION_CREDENTIALS' is not defined, please check your env variables")
 
 try:
     credentials = ee.ServiceAccountCredentials(None, key_file=key_path)
@@ -29,10 +29,10 @@ try:
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
     
-    print("✅ GEE INICIALIZADO EXPLÍCITAMENTE CON ÉXITO.")
+    print("GEE LIVE")
 
 except Exception as e:
-    print(f"ERROR AL INICIALIZAR GEE EXPLÍCITAMENTE: {e}")
+    print(f"Failed to connect to GEE: {e}")
 
     raise e
 
@@ -127,6 +127,11 @@ class GeoAnalytics:
         self.region = ee.Geometry.Point(self.longitude, self.latitude).buffer(
             self.buffer
         )
+
+        self.avg_surface_temp = None
+        self.avg_NVDI = None
+        self.avg_air_quality = None
+
 
         self.temp_image: ee.Image = None
         self.ndvi: ee.Image = None
@@ -252,8 +257,6 @@ class GeoAnalytics:
 
         end_date = ee.Date(datetime.datetime.now()).advance(-7, 'day')
 
-
-
         #Monthly date will consider the median from the last month.
 
         start_date_monthly = end_date.advance(-1, 'month')
@@ -261,11 +264,9 @@ class GeoAnalytics:
 
         #Annual date will consider from last year to today.
 
-
         #! Not using year for a more agile development, in production change all none heat layers to yearly, in the current version the info is from only the last month. 
         start_date_annual = end_date.advance(-1, 'year')
         date_range_annual = (start_date_annual, end_date)  
-
 
         #Heat layer
         self.base_temp = (
@@ -277,6 +278,8 @@ class GeoAnalytics:
             .multiply(0.02)
             .subtract(273.15)
         )
+
+
         #NDVI layer
         s2_composite = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -288,6 +291,7 @@ class GeoAnalytics:
         )
         self.base_ndvi = s2_composite.normalizedDifference(["B8", "B4"]).rename("NDVI")
         self.ndbi = s2_composite.normalizedDifference(["B11", "B8"]).rename("NDBI")
+
     
 
         #Air quality layer
@@ -331,10 +335,40 @@ class GeoAnalytics:
         self.base_aq = (
             ee.ImageCollection(aq_components).mean().rename("AQ_Composite_0_100")
         )
+
+
         self.temp_image = self.base_temp
         self.ndvi = self.base_ndvi
         self.aq_index = self.base_aq
         print("🌍 Base layers calculated successfully.")
+
+    def get_initial_kpis(self): 
+        try: 
+            temp = self._mean(self.temp_image, 1000, self.region)
+            #ndvi = self._mean(self.ndvi, 20, self.region)
+            #air_q = self._mean(self.aq_index, 5000, self.region)
+
+            temp_res = temp.getInfo()
+            #ndvi_res = ndvi.getInfo()
+            #air_q_res = air_q.getInfo()
+
+            temp_kpi = temp_res.get("LST_Day_1km") if temp_res else None
+            #nvdi_kpi = ndvi_res.get("NDVI") if ndvi_res else None
+            #air_q_kpi = air_q_res.get("AQ_Composite_0_100") if air_q_res else None
+
+            #self.avg_air_quality = air_q_kpi
+            #self.avg_NVDI = nvdi_kpi 
+            self.avg_surface_temp = temp_kpi
+
+            return {
+                "avg_surface_temp": temp_kpi,
+                #"avg_NVDI": nvdi_kpi,
+                #"avg_air_quality": air_q_kpi,
+            }
+
+        except Exception as error: 
+            print(f"Error while calculating the kpi's: {error}")
+            return None
 
     def _fit_linear_models_simple(
         self, sample_scale: int = 250, n: int = 4000, seed: int = 13

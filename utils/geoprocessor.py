@@ -342,33 +342,54 @@ class GeoAnalytics:
         self.aq_index = self.base_aq
         print("🌍 Base layers calculated successfully.")
 
-    def get_initial_kpis(self): 
-        try: 
-            temp = self._mean(self.temp_image, 1000, self.region)
-            #ndvi = self._mean(self.ndvi, 20, self.region)
-            #air_q = self._mean(self.aq_index, 5000, self.region)
+    def get_initial_kpis(self, layer_name):      
+        if layer_name == 'heat': 
+            try: 
+                temp = self._mean(self.temp_image, 1000, self.region)
+                temp_res = temp.getInfo()
+                temp_kpi = temp_res.get("LST_Day_1km") if temp_res else None
+                self.avg_surface_temp = temp_kpi
 
-            temp_res = temp.getInfo()
-            #ndvi_res = ndvi.getInfo()
-            #air_q_res = air_q.getInfo()
+                return {
+                    "avg_surface_temp": temp_kpi
+                }
+            except Exception as error: 
+                print(f"Error while calculating the kpi's: {error}")
+                return None 
+                
+                
+        elif layer_name == 'NDVI': 
+            try: 
+                ndvi = self._mean(self.ndvi, 20, self.region)
+                ndvi_res = ndvi.getInfo()
+                nvdi_kpi = ndvi_res.get("NDVI") if ndvi_res else None
+                self.avg_NVDI = nvdi_kpi
+                
+                return {
+                    "avg_NVDI": nvdi_kpi
+                }
+            except Exception as error: 
+                print(f"Error while calculating the kpi's: {error}")
+                return None
+                
 
-            temp_kpi = temp_res.get("LST_Day_1km") if temp_res else None
-            #nvdi_kpi = ndvi_res.get("NDVI") if ndvi_res else None
-            #air_q_kpi = air_q_res.get("AQ_Composite_0_100") if air_q_res else None
+        elif layer_name == 'AQ': 
+            try: 
+                air_q = self._mean(self.aq_index, 5000, self.region)
+                air_q_res = air_q.getInfo()
+                air_q_kpi = air_q_res.get("AQ_Composite_0_100") if air_q_res else None
+                self.avg_air_quality = air_q_kpi
+                
+                return {
+                    "avg_air_quality": air_q_kpi
+                }
+                
 
-            #self.avg_air_quality = air_q_kpi
-            #self.avg_NVDI = nvdi_kpi 
-            self.avg_surface_temp = temp_kpi
+            except Exception as error: 
+                print(f"Error while calculating the kpi's: {error}")
+            
 
-            return {
-                "avg_surface_temp": temp_kpi,
-                #"avg_NVDI": nvdi_kpi,
-                #"avg_air_quality": air_q_kpi,
-            }
-
-        except Exception as error: 
-            print(f"Error while calculating the kpi's: {error}")
-            return None
+        
 
     def _fit_linear_models_simple(
         self, sample_scale: int = 250, n: int = 4000, seed: int = 13

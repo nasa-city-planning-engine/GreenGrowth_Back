@@ -304,8 +304,11 @@ def get_initial_data(layer_name):
             500,
         )
 
-@geo_bp.get("/get-kpis")
-def getKpis(): 
+
+#Valid layer names are "heat", "NDVI", "AQ" respectively for avg_heat, avg_NVDI and avg_AQ. 
+@geo_bp.get("/get-kpis/<layer_name>")
+def getKpis(layer_name):
+    #Currently gets avg-heat
     data = request.args
     try: 
         latitude = data.get("latitude")
@@ -319,7 +322,8 @@ def getKpis():
             longitude=float(longitude), 
             buffer=int(buffer)
         )
-        kpis = analyzer.get_initial_kpis()
+
+        kpis = analyzer.get_initial_kpis(layer_name)
         if kpis is None:
             return jsonify({"status": "error", "message": "Failed to calculate KPIs"}), 500
         

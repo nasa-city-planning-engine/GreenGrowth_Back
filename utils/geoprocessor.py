@@ -3,7 +3,7 @@ import json
 from typing import Dict, Any, Tuple, Optional, Union, List
 import os
 from dotenv import load_dotenv
-
+import datetime
 load_dotenv()
 
 project_id = os.getenv("GEE_PROJECT")
@@ -247,11 +247,25 @@ class GeoAnalytics:
         This is run once on initialization to ensure API endpoints are responsive.
         Layers: Temperature, NDVI (vegetation), Air Quality (composite index).
         """
-        date_range_monthly = (
-            "2024-05-01",
-            "2024-07-31",
-        )  
-        date_range_annual = ("2023-01-01", "2023-12-31")  
+   
+        #Todays date will always be yesterday-
+
+        end_date = ee.Date(datetime.datetime.now()).advance(-7, 'day')
+
+
+
+        #Monthly date will consider the median from the last month.
+
+        start_date_monthly = end_date.advance(-1, 'month')
+        date_range_monthly = (start_date_monthly, end_date)
+
+        #Annual date will consider from last year to today.
+
+
+        #! Not using year for a more agile development, in production change all none heat layers to yearly, in the current version the info is from only the last month. 
+        start_date_annual = end_date.advance(-1, 'year')
+        date_range_annual = (start_date_annual, end_date)  
+
 
         #Heat layer
         self.base_temp = (
@@ -283,28 +297,28 @@ class GeoAnalytics:
                 "tropospheric_NO2_column_number_density",
                 0.0,
                 0.0002,
-                date_range_annual,
+                date_range_monthly,
             ),
             self._get_normalized_gas(
                 "COPERNICUS/S5P/OFFL/L3_SO2",
                 "SO2_column_number_density",
                 0.0,
                 0.0005,
-                date_range_annual,
+                date_range_monthly,
             ),
             self._get_normalized_gas(
                 "COPERNICUS/S5P/OFFL/L3_O3",
                 "O3_column_number_density",
                 0.1,
                 0.15,
-                date_range_annual,
+                date_range_monthly,
             ),
             self._get_normalized_gas(
                 "COPERNICUS/S5P/OFFL/L3_CO",
                 "CO_column_number_density",
                 0.0,
                 0.05,
-                date_range_annual,
+                date_range_monthly,
             ),
             self._get_normalized_gas(
                 "COPERNICUS/S5P/OFFL/L3_AER_AI",

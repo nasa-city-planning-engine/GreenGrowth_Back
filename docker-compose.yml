@@ -10,6 +10,9 @@ services:
       - ./secrets:/app/secrets:ro
       - backend_data:/app/instance
       - ./data:/app/data
+    command: >
+      sh -c "flask init-db &&
+             flask run --host=0.0.0.0 --port=5000"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]

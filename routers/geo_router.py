@@ -550,24 +550,26 @@ def simulate_polygons():
                     400,
                 )
 
-        co2 = data.get("co2", 0)
-        ch4 = data.get("ch4", 0)
-        n2o = data.get("n2o", 0)
+        co2 = data.get("co2") or 0
+        ch4 = data.get("ch4") or 0
+        n2o = data.get("n2o") or 0
         industries_used = data.get("industries_used", [])
-        densidad = data.get("densidad", 0)
-        trafico = data.get("trafico", 0)
-        albedo = data.get("albedo", 0)
-        arboles = data.get("arboles", 0)
-        pasto = data.get("pasto", 0)
-        agua = data.get("agua", 0)
-        copa = data.get("copa", 0)
+        densidad = data.get("densidad") or 0
+        trafico = data.get("trafico") or 0
+        albedo = data.get("albedo") or 0
+        arboles = data.get("arboles") or 0
+        pasto = data.get("pasto") or 0
+        agua = data.get("agua") or 0
+        copa = data.get("copa") or 0
 
-        reported_emissions = None
-        temp_industry = None
+        reported_emissions = 0
+        temp_industry = 0
         industry_model = None
 
 
         if preset == "industrial" or any(isinstance(g, dict) and g.get("preset") == "industrial" for g in geometries_list):
+            local_temp = 0
+            local_reported_emissions = 0
             if all(k in data for k in ("co2", "ch4", "n2o", "industries_used")):
                 reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
                 industries_vector = [0] * len(industries)
@@ -645,7 +647,7 @@ def simulate_polygons():
 
                     local_reported_emissions = g_co2 + (g_ch4 * GWP_CH4) + (g_n2o * GWP_N2O)
 
-                    local_temp = None
+                    local_temp = 0
                     if all(k in geom for k in ("co2", "ch4", "n2o", "industries_used")) and industry_model is not None:
 
                         local_industries_vector = [0] * len(industries)
@@ -678,7 +680,7 @@ def simulate_polygons():
                         temp_industry=local_temp,
                         aq_industry=local_reported_emissions,
                     )
-
+                  
                     report = analyzer.impact_report(
                         geojson_area=geojson_area,
                         preset="industrial",
@@ -688,9 +690,9 @@ def simulate_polygons():
 
                 elif local_preset == "residential_real":
 
-                    g_densidad = geom.get("densidad", densidad)
-                    g_trafico = geom.get("trafico", trafico)
-                    g_albedo = geom.get("albedo", albedo)
+                    g_densidad = geom.get("densidad") or densidad
+                    g_trafico = geom.get("trafico") or trafico
+                    g_albedo = geom.get("albedo") or albedo
 
                     attr_real = {
                         "densidad": {"value": g_densidad, "unit": "buildings_per_km2"},
@@ -706,10 +708,10 @@ def simulate_polygons():
                     )
 
                 else: 
-                    g_arboles = geom.get("arboles", arboles)
-                    g_pasto = geom.get("pasto", pasto)
-                    g_agua = geom.get("agua", agua)
-                    g_copa = geom.get("copa", copa)
+                    g_arboles = geom.get("arboles") or arboles
+                    g_pasto = geom.get("pasto") or pasto
+                    g_agua = geom.get("agua") or agua
+                    g_copa = geom.get("copa") or copa
 
                     attr_green = {
                         "arboles": {"value": g_arboles, "unit": "trees_per_ha"},

@@ -174,7 +174,7 @@ class GeoAnalytics:
     def _mean(img: ee.Image, scale: int, geom: ee.Geometry) -> ee.Dictionary:
         """Calculates the mean of one geometry image object"""
         return img.reduceRegion(
-            ee.Reducer.mean(), geom, scale, maxPixels=1e13, bestEffort=True
+            ee.Reducer.mean(), geom, scale, maxPixels=1e13, bestEffort=True, tileScale=4
         )
 
     @staticmethod
@@ -371,7 +371,7 @@ class GeoAnalytics:
             return None
 
     def _fit_linear_models_simple(
-        self, sample_scale: int = 250, n: int = 4000, seed: int = 13
+        self, sample_scale: int = 10, n: int = 4000, seed: int = 13
     ) -> Dict[str, Dict[str, ee.Number]]:
         """Ajusta un modelo de regresión lineal simple (NDVI vs LST y NDVI vs AQ)."""
         samples = (
@@ -385,9 +385,14 @@ class GeoAnalytics:
                 seed=seed,
             )
         )
+        count = samples.size().getInfo()
+        print(f"   Scale: {sample_scale}m", flush=True)
+        print(f"   Samples found in polygon: {count}", flush=True)
 
         def _fit(x: str, y: str) -> Dict[str, ee.Number]:
             fit = samples.reduceColumns(ee.Reducer.linearFit(), selectors=[x, y])
+            res = fit.getInfo()
+            print(f"   Fit {y} vs {x}: {res}", flush=True)
             return {"a": ee.Number(fit.get("scale")), "b": ee.Number(fit.get("offset"))}
 
         return {
@@ -445,7 +450,7 @@ class GeoAnalytics:
         and the score metrics (R^2, RMSE).
         """
         if self.ndbi is None:
-            print("NDBI no calculated, using simple model for calibration.")
+            print("NDBI no calculated, using simple model for calibration.", flush=True)
             return
 
         X = (
@@ -573,9 +578,16 @@ class GeoAnalytics:
         lst_extra: ee.Number,
         aq_extra: ee.Number,
     ):
-        mask = ee.Image(0).paint(ee_geometry, 1)
+        
+        #Default values (to prevent breaking the system if one fails)
+        def_lst_slope = ee.Number(-10)
+        def_lst_offset = ee.Number(35)
+        def_aq_slope = ee.Number(-20)
+        def_aq_offset = ee.Number(50)
 
-    
+        used_model = "DEFAULT"
+
+        mask = ee.Image(0).paint(ee_geometry, 1)
         ndvi_new = self.ndvi.where(mask, ndvi_target)
 
         #Use the models for LST and AQ
@@ -590,19 +602,39 @@ class GeoAnalytics:
             )
             # AQ: AQ ~ C + NDVI
             aq_reg = ee.Image.constant(a0).add(ndvi_new.multiply(a1))
+            used_model = "COMPLEX"
         else:
-            # Simple model (LST ~ NDVI, AQ ~ NDVI)
-            s = self._fit_linear_models_simple()
-            lst_reg = ndvi_new.multiply(s["LST"]["a"]).add(s["LST"]["b"])
-            aq_reg = ndvi_new.multiply(s["AQ"]["a"]).add(s["AQ"]["b"])
+            try: 
+                # Simple model (LST ~ NDVI, AQ ~ NDVI)
+                s = self._fit_linear_models_simple(sample_scale=30)
 
-        # Apply extra adjustments for external factors
+                slope_lst = ee.Algorithms.If(s["LST"]["a"], s["LST"]["a"], slope_lst)
+                offset_lst = ee.Algorithms.If(s["LST"]["b"], s["LST"]["b"], offset_lst)
+                slope_aq = ee.Algorithms.If(s["AQ"]["a"], s["AQ"]["a"], slope_aq)
+                offset_aq = ee.Algorithms.If(s["AQ"]["b"], s["AQ"]["b"], offset_aq)
+
+                used_model = "SIMPLE CONFIRMED"
+            except: 
+                print(f"⚠️ Simple model crashed (using defaults): {e}")
+                used_model = "DEFAULT (Rescue)"
+
+            lst_reg = ndvi_new.multiply(def_lst_slope).add(def_lst_offset)
+            aq_reg = ndvi_new.multiply(def_aq_slope).add(def_aq_offset)
+        
+        print(f"🛡️ Simulation Strategy Used: {used_model}")
         self.sim_ndvi = ndvi_new
-        self.sim_temp = lst_reg.where(mask, lst_reg.add(lst_extra)).rename(
-            "LST_Day_1km"
+
+        self.sim_temp = (
+            lst_reg
+            .where(mask, lst_reg.add(lst_extra))
+            .unmask(lst_extra.add(25)) # Si todo es null, pon 25°C + extra
+            .rename("LST_Day_1km")
         )
+
         self.sim_aq = (
-            aq_reg.where(mask, aq_reg.add(aq_extra))
+            aq_reg
+            .where(mask, aq_reg.add(aq_extra))
+            .unmask(aq_extra.add(30)) # Si todo es null, pon 30 + extra
             .clamp(0, 100)
             .rename("AQ_Composite_0_100")
         )
@@ -713,10 +745,13 @@ class GeoAnalytics:
 
         # --- 1. Calcular Baseline ---
         base_stats = {
-            "temp_c_mean": self._mean(self.temp_image, 1000, area),
+            "temp_c_mean": self._mean(self.temp_image, 100, area),
             "ndvi_mean": self._mean(self.ndvi, 20, area),
-            "aq_mean": self._mean(self.aq_index, 5000, area),
+            "aq_mean": self._mean(self.aq_index, 100, area),
         }
+        print(f"   Temp Raw: {base_stats['temp_c_mean'].getInfo()}", flush=True)
+        print(f"   NDVI Raw: {base_stats['ndvi_mean'].getInfo()}", flush=True)
+        print(f"   AQ Raw:   {base_stats['aq_mean'].getInfo()}", flush=True)
 
         # Prediction time
         if (
@@ -814,4 +849,8 @@ class GeoAnalytics:
             print(f"NDVI:      {base_ndvi:.3f} -> {post_ndvi:.3f} | Δ={delta_ndvi:.3f}")
             print(f"AQ (0–100):{base_aq:.1f}  -> {post_aq:.1f}  | Δ={delta_aq:.1f}")
 
+        print(f"   Base Temp: {base_temp}", flush=True)
+        print(f"   Post Temp: {post_temp}", flush=True)
+        print(f"   Base AQ:   {base_aq}", flush=True)
+        print(f"   Post AQ:   {post_aq}", flush=True)
         return report

@@ -627,7 +627,7 @@ class GeoAnalytics:
         else:
             try: 
                 # Simple model (LST ~ NDVI, AQ ~ NDVI)
-                s = self._fit_linear_models_simple(sample_scale=30)
+                s = self._fit_linear_models_simple(sample_scale=250)
 
                 slope_lst = ee.Algorithms.If(s["LST"]["a"], s["LST"]["a"], slope_lst)
                 offset_lst = ee.Algorithms.If(s["LST"]["b"], s["LST"]["b"], offset_lst)
@@ -635,7 +635,7 @@ class GeoAnalytics:
                 offset_aq = ee.Algorithms.If(s["AQ"]["b"], s["AQ"]["b"], offset_aq)
 
                 used_model = "SIMPLE CONFIRMED"
-            except: 
+            except Exception as e: 
                 print(f"⚠️ Simple model crashed (using defaults): {e}")
                 used_model = "DEFAULT (Rescue)"
 

@@ -599,6 +599,8 @@ def simulate_polygons():
         print("🗺️ Generating unified batch visualization...")
         global_analyzer.sim_batch_visualization(batch_visualization_data)
 
+        global_kpis = global_analyzer.get_kpis_post_sim()
+
         map_urls = {
             "sim_temp_url": None, "sim_ndvi_url": None, "sim_aq_url": None
         }
@@ -616,6 +618,7 @@ def simulate_polygons():
             "status": "success",
             "message": "Batch simulation completed",
             "payload": {
+                "global_kpis" : global_kpis, 
                 "individual_reports": individual_reports,
                 "map_urls": map_urls
             }

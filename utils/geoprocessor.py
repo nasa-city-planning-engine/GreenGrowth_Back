@@ -630,6 +630,8 @@ class GeoAnalytics:
         aq_extra = ee.Number(aq_extra).clamp(-25.0, 25.0)
         return ndvi_adj, lst_extra, aq_extra
 
+    
+
     def _apply_simulation(
         self,
         ee_geometry: ee.Geometry,
@@ -672,7 +674,7 @@ class GeoAnalytics:
                 # Simple model (LST ~ NDVI, AQ ~ NDVI)
                 s = self._fit_linear_models_simple(sample_scale=250)
 
-                slope_lst = ee.Image.constant(s["LST"]["a"], s["LST"]["a"]).unmask(def_aq_slope)
+                slope_lst = ee.Image.constant(s["LST"]["a"], s["LST"]["a"]).unmask(def_lst_slope)
                 offset_lst = ee.Image.constant(s["LST"]["b"], s["LST"]["b"]).unmask(def_lst_offset)
                 slope_aq = ee.Image.constant(s["AQ"]["a"], s["AQ"]["a"]).unmask(def_aq_slope)
                 offset_aq = ee.Image.constant(s["AQ"]["b"], s["AQ"]["b"]).unmask(def_aq_offset)
@@ -780,6 +782,46 @@ class GeoAnalytics:
             )
 
         self._apply_simulation(ee_geom, ndvi_target_image, lst_extra, aq_extra)
+
+    def get_kpis_post_sim(self) -> Dict[str, float]: 
+        if self.sim_temp is None or self.sim_ndvi is None or self.sim_aq is None: 
+            return None
+
+        stats_temp = self.sim_temp.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=self.region, 
+            scale=1000, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+        stats_ndvi = self.sim_ndvi.reduceRegion(
+            reducer=ee.Reducer.mean(), 
+            geometry=self.region, 
+            scale=100, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+        stats_aq = self.sim_aq.reduceRegion(
+            reducer=ee.Reducer.mean(), 
+            geometry=self.region, 
+            scale=5000, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+
+        try: 
+            temp_mean_sim = stats_temp.get("LST_Day_1km").getInfo()
+            NDVI_mean_sim = stats_ndvi.get("NDVI").getInfo()
+            aq_val_sim = stats_aq.get("AQ_Composite_0_100").getInfo()
+
+            return {
+                "avg_surface_temp_sim" : temp_mean_sim, 
+                "avg_NVDI_sim" : NDVI_mean_sim, 
+                "avg_AQ_sim" : aq_val_sim 
+            }
+        except Exception as e: 
+            print(f"Error while calculating post sim kpis: {e}")
+            return None
 
 
     def impact_report(

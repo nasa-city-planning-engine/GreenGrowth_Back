@@ -674,10 +674,10 @@ class GeoAnalytics:
                 # Simple model (LST ~ NDVI, AQ ~ NDVI)
                 s = self._fit_linear_models_simple(sample_scale=250)
 
-                slope_lst = ee.Image.constant(s["LST"]["a"], s["LST"]["a"]).unmask(def_lst_slope)
-                offset_lst = ee.Image.constant(s["LST"]["b"], s["LST"]["b"]).unmask(def_lst_offset)
-                slope_aq = ee.Image.constant(s["AQ"]["a"], s["AQ"]["a"]).unmask(def_aq_slope)
-                offset_aq = ee.Image.constant(s["AQ"]["b"], s["AQ"]["b"]).unmask(def_aq_offset)
+                slope_lst = ee.Image.constant(s["LST"]["a"]).unmask(def_lst_slope)
+                offset_lst = ee.Image.constant(s["LST"]["b"]).unmask(def_lst_offset)
+                slope_aq = ee.Image.constant(s["AQ"]["a"]).unmask(def_aq_slope)
+                offset_aq = ee.Image.constant(s["AQ"]["b"]).unmask(def_aq_offset)
 
                 used_model = "SIMPLE CONFIRMED"
             except Exception as e: 

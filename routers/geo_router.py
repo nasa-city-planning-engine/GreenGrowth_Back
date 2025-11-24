@@ -464,326 +464,171 @@ def get_simulation_tiles():
 # Simulates environmental impact for a given polygon area
 @geo_bp.post("/simulate-polygons")
 def simulate_polygons():
-    # data request
     data = request.get_json()
     print("Incoming data:", data)
 
     if not data:
-        return jsonify(
-            {
-                "status": "error",
-                "message": "The body of the request is empty",
-                "payload": None,
-            }
-        ), 400
+        return jsonify({"status": "error", "message": "Request body empty"}), 400
 
     try:
+        # --- 1. Extracción de Datos Generales ---
         latitude = data.get("latitude", 0)
         longitude = data.get("longitude", 0)
-        preset = data.get("preset")
-        geometry = data.get("geometry")
-        geometries = data.get("geometries")
-        buffer = data.get("buffer", 1000)
+        buffer = data.get("buffer", 5000) 
+        
+        geometries = data.get("geometries") or ([data.get("geometry")] if data.get("geometry") else [])
+        
+        if not geometries:
+            return jsonify({"status": "error", "message": "No geometries provided"}), 400
 
+        # Datos globales (fallback)
+        global_preset = data.get("preset")
+        global_co2 = data.get("co2", 0)
+        global_ch4 = data.get("ch4", 0)
+        global_n2o = data.get("n2o", 0)
+        global_industries = data.get("industries_used", [])
+        
+        # Diccionario de atributos globales aplanado
+        global_vals = {
+            "densidad": data.get("densidad", 0),
+            "trafico": data.get("trafico", 0),
+            "albedo": data.get("albedo", 0),
+            "arboles": data.get("arboles", 0),
+            "pasto": data.get("pasto", 0),
+            "agua": data.get("agua", False),
+            "copa": data.get("copa", 0)
+        }
 
-        geometries_list = None
-        if geometries is not None:
-            if not isinstance(geometries, list) or len(geometries) == 0:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "`geometries` must be a non-empty list",
-                            "payload": None,
-                        }
-                    ),
-                    400,
-                )
-            geometries_list = geometries
+        # --- 2. Inicializar Analizador GLOBAL ---
+        global_analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
+        
+        individual_reports = []
+        batch_visualization_data = []
+        
+        industry_model = load_model_cached('industry_model.pkl')
 
+        # --- 3. Bucle de Cálculo ---
+        for geom in geometries:
+            # Normalización GeoJSON/Feature
+            geojson_geom = geom.get("geometry") if geom.get("type") == "Feature" else geom
+            props = geom.get("properties", {}) if geom.get("type") == "Feature" else geom
+            
+            local_preset = props.get("preset", global_preset)
+            if not local_preset:
+                continue 
 
-        elif geometry is not None:
-            if isinstance(geometry, list):
-                if len(geometry) == 0:
-                    return (
-                        jsonify(
-                            {
-                                "status": "error",
-                                "message": "`geometry` list is empty",
-                                "payload": None,
-                            }
-                        ),
-                        400,
-                    )
-                geometries_list = geometry
-            else:
-                geometries_list = [geometry]
-        else:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Missing required parameter: geometry or geometries",
-                        "payload": None,
-                    }
-                ),
-                400,
-            )
+            local_temp_delta = 0
+            local_aq_delta = 0
+            target_ndvi_val = 0.1 
 
-        if preset is None:
-            def _geom_has_preset(g):
-                if not isinstance(g, dict):
-                    return False
-                if g.get("preset"):
-                    return True
-                props = g.get("properties")
-                if isinstance(props, dict) and props.get("preset"):
-                    return True
-                return False
+            # A) INDUSTRIAL
+            if local_preset == "industrial":
+                l_co2 = props.get("co2", global_co2)
+                l_ch4 = props.get("ch4", global_ch4)
+                l_n2o = props.get("n2o", global_n2o)
+                l_inds = props.get("industries_used", global_industries)
+                
+                local_emissions = l_co2 + (l_ch4 * GWP_CH4) + (l_n2o * GWP_N2O)
+                local_aq_delta = local_emissions 
 
-            missing_global_preset = any(not _geom_has_preset(g) for g in geometries_list)
-            if missing_global_preset:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Missing required parameter: a top-level `preset` or per-geometry `preset` must be provided",
-                            "payload": None,
-                        }
-                    ),
-                    400,
-                )
-
-        co2 = data.get("co2") or 0
-        ch4 = data.get("ch4") or 0
-        n2o = data.get("n2o") or 0
-        industries_used = data.get("industries_used", [])
-        densidad = data.get("densidad") or 0
-        trafico = data.get("trafico") or 0
-        albedo = data.get("albedo") or 0
-        arboles = data.get("arboles") or 0
-        pasto = data.get("pasto") or 0
-        agua = data.get("agua") or 0
-        copa = data.get("copa") or 0
-
-        reported_emissions = 0
-        temp_industry = 0
-        industry_model = None
-
-
-        if preset == "industrial" or any(isinstance(g, dict) and g.get("preset") == "industrial" for g in geometries_list):
-            local_temp = 0
-            local_reported_emissions = 0
-            if all(k in data for k in ("co2", "ch4", "n2o", "industries_used")):
-                reported_emissions = co2 + (ch4 * GWP_CH4) + (n2o * GWP_N2O)
-                industries_vector = [0] * len(industries)
-                wind_speeds = get_wind_speed(lat=latitude, lon=longitude)
-                if industries_used:
-                    for i in industries_used:
-                        if i in industries:
-                            industries_vector[industries[i]] = 1
-                        else:
-                            print(f"Warning: Unknown industry '{i}' ignored.")
-                data_to_predict = [
-                    latitude,
-                    longitude,
-                    reported_emissions,
-                    *industries_vector,
-                    wind_speeds[0],
-                    wind_speeds[1],
-                    wind_speeds[2],
-                ]
-                x = np.array([data_to_predict], dtype=float)
-                industry_model = load_model_cached('industry_model.pkl')
-                if industry_model is None:
-                    print("Warning: Industry model not found; industrial predictions disabled")
-                else:
+                if industry_model:
+                    inds_vec = [0] * len(industries)
+                    for i in l_inds:
+                        if i in industries: inds_vec[industries[i]] = 1
+                    wind = get_wind_speed(latitude, longitude)
+                    x_input = [latitude, longitude, local_emissions] + inds_vec + list(wind)
                     try:
-                        pred = industry_model.predict(x)
-                        temp_industry = int(pred[0]) if hasattr(pred, '__len__') else int(pred)
+                        pred = industry_model.predict(np.array([x_input], dtype=float))
+                        local_temp_delta = int(pred[0]) if hasattr(pred, '__len__') else int(pred)
                     except Exception as e:
-                        print('Warning: failed to predict industry temp:', e)
+                        print(f"ML Error: {e}")
+                
+                target_ndvi_val = 0.15
 
-            if temp_industry is None:
-                temp_industry = 0
-            if reported_emissions is None:
-                reported_emissions = 0
+            # B) RESIDENCIAL
+            elif local_preset == "residential_real":
+                local_temp_delta = 2 
+                target_ndvi_val = 0.3 
 
+            # C) VERDE
+            elif local_preset == "green_real":
+                local_temp_delta = -2 
+                target_ndvi_val = 0.65 
 
-        results = []
-        for geom in geometries_list:
-            try:
-                if isinstance(geom, dict) and geom.get("type") == "Feature" and "geometry" in geom:
-                    # Support GeoJSON Feature with properties: copy properties into geom so
-                    # downstream code can read per-geometry keys like 'preset', 'densidad', etc.
-                    geojson_area = geom["geometry"]
-                    props = geom.get("properties", {})
-                    if isinstance(props, dict):
-                        # Only copy keys that don't already exist in the feature dict
-                        for k, v in props.items():
-                            if k not in geom:
-                                geom[k] = v
-                elif isinstance(geom, dict) and "geometry" in geom and isinstance(geom["geometry"], dict):
-                    geojson_area = geom["geometry"]
-                elif isinstance(geom, dict) and "type" in geom and "coordinates" in geom:
-                    geojson_area = geom
-                else:
-                    raise ValueError("Invalid geometry entry; expected a GeoJSON geometry or Feature with 'geometry'")
-
-
-                local_preset = None
-                if isinstance(geom, dict) and geom.get("preset"):
-                    local_preset = geom.get("preset")
-                else:
-                    local_preset = preset
-
-                if local_preset not in ("industrial", "residential_real", "green_real"):
-                    raise ValueError(f"Invalid or missing preset for geometry: {local_preset}")
-
-                if local_preset == "industrial":
-                    g_co2 = geom.get("co2", co2)
-                    g_ch4 = geom.get("ch4", ch4)
-                    g_n2o = geom.get("n2o", n2o)
-                    g_industries_used = geom.get("industries_used", industries_used)
-
-                    if any(k not in geom for k in ("co2", "ch4", "n2o", "industries_used")) and reported_emissions is None:
-                        raise ValueError("Missing industrial parameters (co2, ch4, n2o, industries_used) for industrial preset")
-
-                    local_reported_emissions = g_co2 + (g_ch4 * GWP_CH4) + (g_n2o * GWP_N2O)
-
-                    local_temp = 0
-                    if all(k in geom for k in ("co2", "ch4", "n2o", "industries_used")) and industry_model is not None:
-
-                        local_industries_vector = [0] * len(industries)
-                        for i in g_industries_used:
-                            if i in industries:
-                                local_industries_vector[industries[i]] = 1
-                        wind_speeds = get_wind_speed(lat=latitude, lon=longitude)
-                        data_to_predict = [
-                            latitude,
-                            longitude,
-                            local_reported_emissions,
-                            *local_industries_vector,
-                            wind_speeds[0],
-                            wind_speeds[1],
-                            wind_speeds[2],
-                        ]
-                        x = np.array([data_to_predict], dtype=float)
-                        try:
-                            p = industry_model.predict(x)
-                            local_temp = int(p[0]) if hasattr(p, '__len__') else int(p)
-                        except Exception:
-                            local_temp = temp_industry
-                    else:
-                        local_temp = temp_industry
-
-                    analyzer = GeoAnalytics(
-                        latitude=latitude,
-                        longitude=longitude,
-                        buffer=buffer,
-                        temp_industry=local_temp,
-                        aq_industry=local_reported_emissions,
-                    )
-                  
-                    report = analyzer.impact_report(
-                        geojson_area=geojson_area,
-                        preset="industrial",
-                        buffer_m=buffer,
-                        calibrate=True,
-                    )
-
-                elif local_preset == "residential_real":
-
-                    g_densidad = geom.get("densidad") or densidad
-                    g_trafico = geom.get("trafico") or trafico
-                    g_albedo = geom.get("albedo") or albedo
-
-                    attr_real = {
-                        "densidad": {"value": g_densidad, "unit": "buildings_per_km2"},
-                        "trafico": {"value": g_trafico, "unit": "veh_day"},
-                        "albedo": {"value": g_albedo, "unit": "albedo_0_1"},
-                    }
-                    analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
-                    report = analyzer.impact_report(
-                        geojson_area=geojson_area,
-                        preset=("residential_real", attr_real),
-                        buffer_m=1000,
-                        calibrate=False,
-                    )
-
-                else: 
-                    g_arboles = geom.get("arboles") or arboles
-                    g_pasto = geom.get("pasto") or pasto
-                    g_agua = geom.get("agua") or agua
-                    g_copa = geom.get("copa") or copa
-
-                    attr_green = {
-                        "arboles": {"value": g_arboles, "unit": "trees_per_ha"},
-                        "pasto": {"value": g_pasto, "unit": "pct"},
-                        "agua": g_agua,
-                        "copa": {"value": g_copa, "unit": "pct"},
-                    }
-                    analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=buffer)
-                    report = analyzer.impact_report(
-                        geojson_area=geojson_area,
-                        preset=("green_real", attr_green),
-                        buffer_m=1000,
-                        calibrate=False,
-                    )
-
-                sim_temp_url = None
-                sim_ndvi_url = None
-                sim_aq_url = None
-                try:
-                    if getattr(analyzer, 'sim_temp', None) is not None:
-                        sim_temp_url = analyzer.get_tile_url(analyzer.sim_temp, analyzer.temp_vis_params)
-                    if getattr(analyzer, 'sim_ndvi', None) is not None:
-                        sim_ndvi_url = analyzer.get_tile_url(analyzer.sim_ndvi, analyzer.ndvi_vis_params)
-                    if getattr(analyzer, 'sim_aq', None) is not None:
-                        sim_aq_url = analyzer.get_tile_url(analyzer.sim_aq, analyzer.aq_vis_params)
-                except Exception as e:
-                    print('Warning: failed to generate sim tile URLs for a polygon:', e)
-
-                results.append({
-                    "report": report,
-                    "sim_temp_url": sim_temp_url,
-                    "sim_ndvi_url": sim_ndvi_url,
-                    "sim_aq_url": sim_aq_url,
-                })
-
-            except Exception as e:
-                results.append({
-                    "report": None,
-                    "sim_temp_url": None,
-                    "sim_ndvi_url": None,
-                    "sim_aq_url": None,
-                    "error": str(e),
-                })
-
-        return (
-            jsonify(
-                {
-                    "status": "success",
-                    "message": "Simulation(s) completed successfully",
-                    "payload": results,
+            
+            # --- Preparación del Argumento Preset (CORREGIDO: Unidades Explícitas) ---
+            local_analyzer = GeoAnalytics(latitude=latitude, longitude=longitude, buffer=1000)
+            
+            preset_arg = local_preset
+            
+            if local_preset == "residential_real":
+                # Mapeo explícito de unidades requeridas por _GA_CFG
+                attrs = {
+                    "densidad": {"value": props.get("densidad", global_vals["densidad"]), "unit": "buildings_per_km2"},
+                    "trafico":  {"value": props.get("trafico", global_vals["trafico"]),   "unit": "veh_day"},
+                    "albedo":   {"value": props.get("albedo", global_vals["albedo"]),     "unit": "albedo_0_1"}
                 }
-            ),
-            201,
-        )
+                preset_arg = (local_preset, attrs)
+                
+            elif local_preset == "green_real":
+                # Mapeo explícito de unidades requeridas por _GA_CFG
+                attrs = {
+                    "arboles": {"value": props.get("arboles", global_vals["arboles"]), "unit": "trees_per_ha"},
+                    "pasto":   {"value": props.get("pasto", global_vals["pasto"]),     "unit": "pct"},
+                    "copa":    {"value": props.get("copa", global_vals["copa"]),       "unit": "pct"},
+                    "agua":    props.get("agua", global_vals["agua"]) # Agua es booleano directo, no dict
+                }
+                preset_arg = (local_preset, attrs)
+
+            # Calculamos reporte
+            report = local_analyzer.impact_report(geojson_geom, preset=preset_arg, calibrate=False)
+            
+            individual_reports.append({
+                "geometry_index": geometries.index(geom),
+                "report": report
+            })
+
+            batch_visualization_data.append({
+                "geometry": global_analyzer._geojson_to_ee_geom(geojson_geom),
+                "lst_extra": local_temp_delta,
+                "aq_extra": local_aq_delta,
+                "ndvi_target": target_ndvi_val
+            })
+
+        # --- 4. Generación de Mapa Unificado ---
+        print("🗺️ Generating unified batch visualization...")
+        global_analyzer.sim_batch_visualization(batch_visualization_data)
+
+        global_kpis = global_analyzer.get_kpis_post_sim()
+
+        map_urls = {
+            "sim_temp_url": None, "sim_ndvi_url": None, "sim_aq_url": None
+        }
+        try:
+            if getattr(global_analyzer, 'sim_temp', None):
+                map_urls["sim_temp_url"] = global_analyzer.get_tile_url(global_analyzer.sim_temp, global_analyzer.temp_vis_params)
+            if getattr(global_analyzer, 'sim_ndvi', None):
+                map_urls["sim_ndvi_url"] = global_analyzer.get_tile_url(global_analyzer.sim_ndvi, global_analyzer.ndvi_vis_params)
+            if getattr(global_analyzer, 'sim_aq', None):
+                map_urls["sim_aq_url"] = global_analyzer.get_tile_url(global_analyzer.sim_aq, global_analyzer.aq_vis_params)
+        except Exception as e:
+            print(f"Tile Generation Error: {e}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Batch simulation completed",
+            "payload": {
+                "global_kpis" : global_kpis, 
+                "individual_reports": individual_reports,
+                "map_urls": map_urls
+            }
+        }), 201
 
     except Exception as e:
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": str(e),
-                    "payload": None,
-                }
-            ),
-            500,
-        )
-
-
+        print(f"Critical Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 

@@ -25,14 +25,24 @@ def create_message():
         })
 
     try:
-        # Create a new Message instance from request data
+        # Optional user_id (can be None)
+        user_id = data.get("user_id")
+
+        # Build tag objects safely
+        tags = []
+        for tag_name in data.get("tags", []):
+            tag = Tag.query.filter_by(name=tag_name).first()
+            if tag:
+                tags.append(tag)
+
+        # Create message object
         new_message = Message(
             content=data["content"],
             latitude=data["latitude"],
             longitude=data["longitude"],
             location=data["location"],
-            user_id=data["user_id"],
-            tags=[Tag.query.filter_by(name=tag).first() for tag in data.get("tags", [])],
+            user_id=user_id,     # <-- NOW OPTIONAL
+            tags=tags,
         )
 
         db.session.add(new_message)
@@ -49,6 +59,7 @@ def create_message():
                     "longitude": new_message.longitude,
                     "location": new_message.location,
                     "tags": [tag.name for tag in new_message.tags],
+                    "user_id": new_message.user_id,
                 },
             }),
             201,

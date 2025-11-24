@@ -34,7 +34,7 @@ class Message(db.Model):
 
     # Foreign key to the user who created the message
     user_id = db.Column(
-        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
 
     # Many-to-many relationship with Tag

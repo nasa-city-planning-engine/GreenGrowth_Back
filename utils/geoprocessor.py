@@ -245,6 +245,44 @@ class GeoAnalytics:
 
         normalized = self._normalize(collection, vmin, vmax, to=100)
         return normalized.rename("v")
+    
+    def sim_batch_visualization(self, features_data: List[Dict[str, any]]): 
+        canvas_lst = ee.Image(0).selfMask()
+        canvas_aq = ee.Image(0).selfMask()
+
+        final_ndvi = self.ndvi
+        final_lst_deltas = ee.Image(0)
+        final_aq_deltas = ee.Image(0)
+
+        global_mask = ee.Image(0)
+
+        for item in features_data: 
+            geom = item['geometry']
+
+            delta_t = ee.Number(item['lst_extra'])
+            delta_aq = ee.Number(item['aq_extra'])
+            tgt_ndvi = item['ndvi_target']
+
+            local_mask = ee.Image(0).paint(geom, 1)
+            global_mask = global_mask.add(local_mask)
+
+            img_delta_t = ee.Image.constant(delta_t).clip(geom)
+            img_delta_aq = ee.Image.constant(delta_aq).clip(geom)
+
+            final_lst_deltas = final_lst_deltas.where(local_mask, img_delta_t)
+            final_aq_deltas = final_aq_deltas.where(local_mask, img_delta_aq)
+
+            if isinstance(tgt_ndvi, (int, float)): 
+                tgt_ndvi = ee.Image.constant(tgt_ndvi)
+            final_ndvi = final_ndvi.where(local_mask, tgt_ndvi)
+        lst_reg = final_ndvi.multiply(-10).add(35) 
+        aq_reg = final_ndvi.multiply(-20).add(50)
+
+        self.sim_temp = lst_reg.add(final_lst_deltas).rename("LST_Day_1km")
+        self.sim_aq = aq_reg.add(final_aq_deltas).clamp(0, 100).rename("AQ_Composite_0_100")
+        self.sim_ndvi = final_ndvi
+
+        print("Layers generated")        
 
     def _calculate_base_layers(self):
         """
@@ -592,6 +630,8 @@ class GeoAnalytics:
         aq_extra = ee.Number(aq_extra).clamp(-25.0, 25.0)
         return ndvi_adj, lst_extra, aq_extra
 
+    
+
     def _apply_simulation(
         self,
         ee_geometry: ee.Geometry,
@@ -605,6 +645,11 @@ class GeoAnalytics:
         def_lst_offset = ee.Number(35)
         def_aq_slope = ee.Number(-20)
         def_aq_offset = ee.Number(50)
+
+        slope_lst = def_lst_slope
+        offset_lst = def_lst_offset
+        slope_aq = def_aq_slope
+        offset_aq = def_aq_offset
 
         used_model = "DEFAULT"
 
@@ -629,18 +674,18 @@ class GeoAnalytics:
                 # Simple model (LST ~ NDVI, AQ ~ NDVI)
                 s = self._fit_linear_models_simple(sample_scale=250)
 
-                slope_lst = ee.Algorithms.If(s["LST"]["a"], s["LST"]["a"], slope_lst)
-                offset_lst = ee.Algorithms.If(s["LST"]["b"], s["LST"]["b"], offset_lst)
-                slope_aq = ee.Algorithms.If(s["AQ"]["a"], s["AQ"]["a"], slope_aq)
-                offset_aq = ee.Algorithms.If(s["AQ"]["b"], s["AQ"]["b"], offset_aq)
+                slope_lst = ee.Image.constant(s["LST"]["a"]).unmask(def_lst_slope)
+                offset_lst = ee.Image.constant(s["LST"]["b"]).unmask(def_lst_offset)
+                slope_aq = ee.Image.constant(s["AQ"]["a"]).unmask(def_aq_slope)
+                offset_aq = ee.Image.constant(s["AQ"]["b"]).unmask(def_aq_offset)
 
                 used_model = "SIMPLE CONFIRMED"
             except Exception as e: 
                 print(f"⚠️ Simple model crashed (using defaults): {e}")
                 used_model = "DEFAULT (Rescue)"
 
-            lst_reg = ndvi_new.multiply(def_lst_slope).add(def_lst_offset)
-            aq_reg = ndvi_new.multiply(def_aq_slope).add(def_aq_offset)
+            lst_reg = ndvi_new.multiply(slope_lst).add(offset_lst)
+            aq_reg = ndvi_new.multiply(slope_aq).add(offset_aq)
         
         print(f"🛡️ Simulation Strategy Used: {used_model}")
         self.sim_ndvi = ndvi_new
@@ -655,7 +700,7 @@ class GeoAnalytics:
         self.sim_aq = (
             aq_reg
             .where(mask, aq_reg.add(aq_extra))
-            .unmask(aq_extra.add(30)) # Si todo es null, pon 30 + extra
+            .unmask(aq_extra.add(30)) # Si todo es null, se pone 30 + extra
             .clamp(0, 100)
             .rename("AQ_Composite_0_100")
         )
@@ -691,7 +736,7 @@ class GeoAnalytics:
         pasto: Dict[str, Any],
         agua: bool,
         copa: Dict[str, Any],
-        date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31"),
+        date_range_monthly: Tuple[str, str] = ("2025-05-01", "2025-05-31")
     ):
         """Predicts impact on green areas"""
         ee_geom = self._geojson_to_ee_geom(geojson_area)
@@ -737,6 +782,46 @@ class GeoAnalytics:
             )
 
         self._apply_simulation(ee_geom, ndvi_target_image, lst_extra, aq_extra)
+
+    def get_kpis_post_sim(self) -> Dict[str, float]: 
+        if self.sim_temp is None or self.sim_ndvi is None or self.sim_aq is None: 
+            return None
+
+        stats_temp = self.sim_temp.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=self.region, 
+            scale=1000, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+        stats_ndvi = self.sim_ndvi.reduceRegion(
+            reducer=ee.Reducer.mean(), 
+            geometry=self.region, 
+            scale=100, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+        stats_aq = self.sim_aq.reduceRegion(
+            reducer=ee.Reducer.mean(), 
+            geometry=self.region, 
+            scale=5000, 
+            maxPixels=1e13, 
+            bestEffort=True
+        )
+
+        try: 
+            temp_mean_sim = stats_temp.get("LST_Day_1km").getInfo()
+            NDVI_mean_sim = stats_ndvi.get("NDVI").getInfo()
+            aq_val_sim = stats_aq.get("AQ_Composite_0_100").getInfo()
+
+            return {
+                "avg_surface_temp_sim" : temp_mean_sim, 
+                "avg_NVDI_sim" : NDVI_mean_sim, 
+                "avg_AQ_sim" : aq_val_sim 
+            }
+        except Exception as e: 
+            print(f"Error while calculating post sim kpis: {e}")
+            return None
 
 
     def impact_report(
